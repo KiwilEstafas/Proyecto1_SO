@@ -46,18 +46,20 @@ pub struct MyThread {
     pub state: ThreadState,
     pub sched_type: SchedulerType,
     pub tickets: u32, //Para el lottery
+    pub deadline: Option<u64>, //Para simular prioridad de timepo
     // Usamos Option para poder 'take()' el closure temporalmente sin doble prestamo.
     entry: Option<ThreadEntry>,
 }
 
 impl MyThread {
-    fn new(id: ThreadId, name: String, sched_type: SchedulerType, entry: ThreadEntry, tickets: u32 ) -> Self {
+    fn new(id: ThreadId, name: String, sched_type: SchedulerType, entry: ThreadEntry, tickets: u32, deadline: Option<u64>) -> Self {
         Self {
             id,
             name,
             state: ThreadState::New,
             sched_type,
             tickets,
+            deadline,
             entry: Some(entry),
         }
     }
@@ -85,13 +87,14 @@ impl ThreadRuntime {
         name: impl Into<String>,
         sched: SchedulerType,
         entry: ThreadEntry,
-        tickets: Option<u32> //Aceptar ticketes opcionales
+        tickets: Option<u32>, //Aceptar ticketes opcionales
+        deadline: Option<u64> //Prioridad opcional
     ) -> ThreadId {
         let tid = self.next_tid;
         self.next_tid += 1;
 
         let tickets = tickets.unwrap_or(1);
-        let mut t = MyThread::new(tid, name.into(), sched, entry, tickets);
+        let mut t = MyThread::new(tid, name.into(), sched, entry, tickets, deadline);
         t.state = ThreadState::Ready;
 
         self.threads.insert(tid, t);
@@ -208,10 +211,24 @@ impl ThreadRuntime {
     }
 
     fn schedule_realtime(&mut self) -> Option<ThreadId> {
-        //TODO
-        println!("Sin implementar por el momento!!, mientras usa RR");
-        self.schedule_roundrobin()
+        let ready_threads: Vec<&MyThread> = self.ready.iter().filter_map(|tid| self.threads.get(tid)).collect();
+
+        if ready_threads.is_empty() {
+            return None
+        }
+
+        //Seleccionar el hilo con el deadline mas corto (más urgente)
+        let min_thread = ready_threads.iter().filter_map(|t| t.deadline.map(|d| (t.id, d))).min_by_key(|&(_, d)| d).map(|(id, _)| id);
+        
+        //Seleccionar el hilo y en caso que no hay, se ejecuta rr
+        if let Some(tid) = min_thread{
+            self.ready.retain(|&id| id != tid);
+            Some(tid)
+        } else {
+            self.schedule_roundrobin()
+        }
     }
+    
 
     fn enqueue_ready(&mut self, tid: ThreadId) {
         if let Some(t) = self.threads.get_mut(&tid) {
@@ -231,8 +248,9 @@ pub fn my_thread_create(
     sched: SchedulerType,
     entry: ThreadEntry,
     tickets: Option<u32>,
+    deadline: Option<u64>
 ) -> ThreadId {
-    rt.spawn(name, sched, entry, tickets)
+    rt.spawn(name, sched, entry, tickets,deadline)
 }
 
 pub fn my_thread_end() -> ThreadSignal {
@@ -270,6 +288,7 @@ mod tests {
                 my_thread_yield()
             }),
             None,
+            None,
         );
 
         // Hilo B
@@ -286,6 +305,7 @@ mod tests {
                 }
                 my_thread_yield()
             }),
+            None,
             None,
         );
 
@@ -315,6 +335,7 @@ mod tests {
                 my_thread_yield()
             }),
             Some(3),
+            None,
         );
 
         // Hilo B con 1 ticket
@@ -328,6 +349,7 @@ mod tests {
                 my_thread_yield()
             }),
             Some(1),
+            None,
         );
 
         // Ejecutar muchos ciclos
@@ -340,4 +362,39 @@ mod tests {
 
         assert!(a_total > b_total);
     }
+    #[test]
+    fn realtime_scheduler_runs_earliest_deadline_first() {
+        use std::sync::{Arc, Mutex};
+
+        let mut rt = ThreadRuntime::new();
+        let order = Arc::new(Mutex::new(Vec::new()));
+
+        // Hilo con deadline más lejano
+        let order_low = Arc::clone(&order);
+        let entry_low: ThreadEntry = Box::new(move |_rt, _tid| {
+            order_low.lock().unwrap().push("Low".to_string());
+            my_thread_end()
+        });
+
+        // Hilo con deadline más cercano (más urgente)
+        let order_high = Arc::clone(&order);
+        let entry_high: ThreadEntry = Box::new(move |_rt, _tid| {
+            order_high.lock().unwrap().push("High".to_string());
+            my_thread_end()
+        });
+
+        // Crear los hilos usando my_thread_create con scheduler RealTime
+        // Suponiendo que my_thread_create ahora recibe deadline como Option<i32>
+        my_thread_create(&mut rt, "Low", SchedulerType::RealTime, entry_low, None, Some(20));  // menos urgente
+        my_thread_create(&mut rt, "High", SchedulerType::RealTime, entry_high, None, Some(5)); // más urgente
+
+        // Ejecutar el runtime
+        rt.run(2);
+
+        // Verificar orden de ejecución
+        let seq = order.lock().unwrap().clone();
+        println!("Execution order: {:?}", seq);
+        assert_eq!(seq[0], "High", "El hilo con el menor deadline debe ejecutarse primero");
+    }
+
 }
