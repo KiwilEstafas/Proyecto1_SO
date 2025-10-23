@@ -1,15 +1,16 @@
-//! mypthreads – MVP cooperativo con Round Robin.
-//! - ThreadRuntime: núcleo de hilos (cola READY, hilo actual, diccionario).
-//! - MyThread: metadatos + entry (closure) que devuelve una señal.
-//! - Señales: Continue | Yield | Exit
-//! - Wrappers my_thread_create / my_thread_yield / my_thread_end
+//! mypthreads mvp cooperativo con round robin
+//! threadruntime es el nucleo de hilos con cola ready hilo actual y diccionario
+//! mythread almacena metadatos y la entry que devuelve una senal
+//! senales continue yield block exit
+//! wrappers my_thread_create my_thread_yield my_thread_end my_thread_join my_thread_detach
+//! mutex minimo con init y destroy
 
 use std::collections::{HashMap, VecDeque};
-use rand::Rng; 
+use rand::Rng;
 
 pub type ThreadId = u32;
 
-//Estados del hilo
+// estados del hilo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
     New,
@@ -20,7 +21,7 @@ pub enum ThreadState {
     Detached,
 }
 
-//Tipos de planificador a implementar
+// tipos de planificador
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedulerType {
     RoundRobin,
@@ -28,31 +29,42 @@ pub enum SchedulerType {
     RealTime,
 }
 
-//Señales del hilo
+// senales del hilo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadSignal {
-    Continue,
-    Yield,
-    Exit,
+    Continue, // hilo sigue y se reencola como yield en este mvp
+    Yield,    // hilo cede y se reencola al final
+    Block,    // hilo se bloquea y no se reencola
+    Exit,     // hilo termina
 }
 
+// la funcion de entrada del hilo recibe el runtime y su tid y devuelve una senal
 pub type ThreadEntry =
     Box<dyn FnMut(&mut ThreadRuntime, ThreadId) -> ThreadSignal + Send + 'static>;
 
-//Estructura del hilo
+// estructura del hilo
 pub struct MyThread {
     pub id: ThreadId,
     pub name: String,
     pub state: ThreadState,
     pub sched_type: SchedulerType,
-    pub tickets: u32, //Para el lottery
-    pub deadline: Option<u64>, //Para simular prioridad de timepo
-    // Usamos Option para poder 'take()' el closure temporalmente sin doble prestamo.
+    pub tickets: u32,             // para lottery
+    pub deadline: Option<u64>,    // deadline absoluto en milisegundos logicos
+    pub detached: bool,           // si es true no se puede hacer join y se limpia al terminar
+    pub joiners: Vec<ThreadId>,   // hilos que esperan a este hilo
+    // usamos option para poder take del closure temporalmente y evitar doble prestamo mutable
     entry: Option<ThreadEntry>,
 }
 
 impl MyThread {
-    fn new(id: ThreadId, name: String, sched_type: SchedulerType, entry: ThreadEntry, tickets: u32, deadline: Option<u64>) -> Self {
+    fn new(
+        id: ThreadId,
+        name: String,
+        sched_type: SchedulerType,
+        entry: ThreadEntry,
+        tickets: u32,
+        deadline: Option<u64>,
+    ) -> Self {
         Self {
             id,
             name,
@@ -60,12 +72,17 @@ impl MyThread {
             sched_type,
             tickets,
             deadline,
+            detached: false,
+            joiners: Vec::new(),
             entry: Some(entry),
         }
     }
 }
 
+// nucleo de ejecucion con cola ready y reloj logico
 pub struct ThreadRuntime {
+    // reloj logico de la simulacion en milisegundos
+    now_ms: u64,
     next_tid: ThreadId,
     pub threads: HashMap<ThreadId, MyThread>,
     pub ready: VecDeque<ThreadId>,
@@ -75,6 +92,7 @@ pub struct ThreadRuntime {
 impl ThreadRuntime {
     pub fn new() -> Self {
         Self {
+            now_ms: 0,
             next_tid: 1,
             threads: HashMap::new(),
             ready: VecDeque::new(),
@@ -82,16 +100,26 @@ impl ThreadRuntime {
         }
     }
 
+    // avanza el reloj logico en dt_ms
+    pub fn advance_time(&mut self, dt_ms: u64) {
+        self.now_ms = self.now_ms.saturating_add(dt_ms);
+    }
+
+    // devuelve el tiempo logico actual
+    pub fn now(&self) -> u64 {
+        self.now_ms
+    }
+
     pub fn spawn(
         &mut self,
         name: impl Into<String>,
         sched: SchedulerType,
         entry: ThreadEntry,
-        tickets: Option<u32>, //Aceptar ticketes opcionales
-        deadline: Option<u64> //Prioridad opcional
+        tickets: Option<u32>,
+        deadline: Option<u64>,
     ) -> ThreadId {
         let tid = self.next_tid;
-        self.next_tid += 1;
+        self.next_tid = self.next_tid.wrapping_add(1);
 
         let tickets = tickets.unwrap_or(1);
         let mut t = MyThread::new(tid, name.into(), sched, entry, tickets, deadline);
@@ -102,36 +130,35 @@ impl ThreadRuntime {
         tid
     }
 
-    /// Ejecuta un "quantum" lógico con Round Robin.
+    // ejecuta un quantum logico
     pub fn run_once(&mut self) {
-        // Seleccionar hilo según scheduler
+        // seleccionar hilo segun scheduler
         let Some(tid) = self.select_next_thread() else {
             return;
         };
 
-        // Marcar como RUNNING
+        // marcar como running
         if let Some(t) = self.threads.get_mut(&tid) {
             t.state = ThreadState::Running;
         }
         self.current_tid = Some(tid);
 
-        // === Punto clave: extraer temporalmente el 'entry' para evitar préstamo doble ===
+        // extraer temporalmente el entry para evitar doble prestamo mutable
         let mut entry = {
             let t = self.threads.get_mut(&tid).expect("thread debe existir");
             t.entry.take().expect("entry debe existir")
         };
 
-        // Ejecutar el paso del hilo SIN tener prestado self.threads
+        // ejecutar el paso del hilo sin tener prestado self threads
         let signal = (entry)(self, tid);
 
-        // Devolver el entry al hilo para futuras llamadas
+        // devolver el entry al hilo
         {
             let t = self.threads.get_mut(&tid).expect("thread debe existir");
             t.entry = Some(entry);
         }
-        // === fin del manejo de entry ===
 
-        // Manejar la señal
+        // manejar la senal
         match signal {
             ThreadSignal::Continue => {
                 self.enqueue_ready(tid);
@@ -139,9 +166,28 @@ impl ThreadRuntime {
             ThreadSignal::Yield => {
                 self.enqueue_ready(tid);
             }
-            ThreadSignal::Exit => {
+            ThreadSignal::Block => {
+                // el hilo queda en estado blocked y no se reencola
                 if let Some(t) = self.threads.get_mut(&tid) {
+                    t.state = ThreadState::Blocked;
+                }
+            }
+            ThreadSignal::Exit => {
+                // obtener joiners y bandera detached sin asignaciones previas
+                let (joiners_to_wake, detached) = {
+                    let t = self.threads.get_mut(&tid).expect("thread debe existir");
                     t.state = ThreadState::Terminated;
+                    (std::mem::take(&mut t.joiners), t.detached)
+                };
+
+                // despertar joiners
+                for jtid in joiners_to_wake {
+                    self.wake(jtid);
+                }
+
+                // si es detached se limpia la estructura
+                if detached {
+                    self.threads.remove(&tid);
                 }
             }
         }
@@ -149,23 +195,23 @@ impl ThreadRuntime {
         self.current_tid = None;
     }
 
-    //para que se ejecute continueamente
-    pub fn run(&mut self, cycles: usize){
-        for _ in 0..cycles{
+    // ejecuta multiples ciclos sin tocar el reloj
+    pub fn run(&mut self, cycles: usize) {
+        for _ in 0..cycles {
             self.run_once();
-            if self.ready.is_empty(){
+            if self.ready.is_empty() {
                 break;
             }
         }
     }
 
-    //Selecciona el siguiente hilo a ejecutar segun su scheduler
-    fn select_next_thread(&mut self) -> Option<ThreadId>{
-        if self.ready.is_empty(){
+    // selecciona el siguiente hilo a ejecutar segun su scheduler
+    fn select_next_thread(&mut self) -> Option<ThreadId> {
+        if self.ready.is_empty() {
             return None;
         }
 
-        //Fijarse en el primer hilo para ver cual es
+        // mirar el primer hilo para decidir la politica a aplicar
         let front_tid = *self.ready.front().unwrap();
         let sched_type = self.threads.get(&front_tid)?.sched_type;
 
@@ -176,12 +222,16 @@ impl ThreadRuntime {
         }
     }
 
-    fn schedule_roundrobin(&mut self) -> Option<ThreadId>{
+    // politica round robin
+    fn schedule_roundrobin(&mut self) -> Option<ThreadId> {
         self.ready.pop_front()
     }
 
+    // politica lottery con tickets
     fn schedule_lottery(&mut self) -> Option<ThreadId> {
-        let ready_threads: Vec<&MyThread> = self.ready.iter()
+        let ready_threads: Vec<&MyThread> = self
+            .ready
+            .iter()
             .filter_map(|tid| self.threads.get(tid))
             .collect();
 
@@ -189,57 +239,84 @@ impl ThreadRuntime {
             return None;
         }
 
-        // Sumar tickets
+        // sumar tickets
         let total_tickets: u32 = ready_threads.iter().map(|t| t.tickets).sum();
-        let mut rng = rand::rng();
-        let mut pick = rng.random_range(0..total_tickets);
 
-        // Buscar ganador
+        // sorteo usando rand 0 dot 9
+        let mut rng = rand::rng();
+        let mut pick: u32 = rng.random_range(0..total_tickets);
+
+        // buscar ganador
         for t in &ready_threads {
             if pick < t.tickets {
-                // Remover el thread de la cola ready
+                // remover el ganador de la cola ready
                 self.ready.retain(|&tid| tid != t.id);
                 return Some(t.id);
             }
             pick -= t.tickets;
         }
 
-        // fallback, no debería pasar
+        // caso de respaldo
         let t = ready_threads[0];
         self.ready.retain(|&tid| tid != t.id);
         Some(t.id)
     }
 
+    // politica tiempo real usando edf sobre reloj logico
+    // se elige el hilo con menor tiempo restante a su deadline absoluto
+    // si nadie tiene deadline se cae a round robin
     fn schedule_realtime(&mut self) -> Option<ThreadId> {
-        let ready_threads: Vec<&MyThread> = self.ready.iter().filter_map(|tid| self.threads.get(tid)).collect();
+        let now = self.now_ms;
+
+        let ready_threads: Vec<&MyThread> = self
+            .ready
+            .iter()
+            .filter_map(|tid| self.threads.get(tid))
+            .collect();
 
         if ready_threads.is_empty() {
-            return None
+            return None;
         }
 
-        //Seleccionar el hilo con el deadline mas corto (más urgente)
-        let min_thread = ready_threads.iter().filter_map(|t| t.deadline.map(|d| (t.id, d))).min_by_key(|&(_, d)| d).map(|(id, _)| id);
-        
-        //Seleccionar el hilo y en caso que no hay, se ejecuta rr
-        if let Some(tid) = min_thread{
+        // calcular tiempo restante a deadline y elegir el minimo
+        let candidate = ready_threads
+            .iter()
+            .filter_map(|t| t.deadline.map(|d| (t.id, d.saturating_sub(now))))
+            .min_by_key(|&(_, remaining)| remaining)
+            .map(|(id, _)| id);
+
+        if let Some(tid) = candidate {
             self.ready.retain(|&id| id != tid);
             Some(tid)
         } else {
             self.schedule_roundrobin()
         }
     }
-    
 
+    // mover hilo a ready
     fn enqueue_ready(&mut self, tid: ThreadId) {
         if let Some(t) = self.threads.get_mut(&tid) {
             t.state = ThreadState::Ready;
         }
         self.ready.push_back(tid);
     }
+
+    // despertar hilo bloqueado
+    fn wake(&mut self, tid: ThreadId) {
+        if let Some(t) = self.threads.get_mut(&tid) {
+            t.state = ThreadState::Ready;
+        }
+        self.ready.push_back(tid);
+    }
+
+    // obtener el tid del hilo actual si existe
+    fn current(&self) -> Option<ThreadId> {
+        self.current_tid
+    }
 }
 
 /* =========
- * Wrappers estilo mypthreads (MVP)
+ * wrappers estilo mypthreads mvp
  * ========= */
 
 pub fn my_thread_create(
@@ -248,9 +325,9 @@ pub fn my_thread_create(
     sched: SchedulerType,
     entry: ThreadEntry,
     tickets: Option<u32>,
-    deadline: Option<u64>
+    deadline: Option<u64>,
 ) -> ThreadId {
-    rt.spawn(name, sched, entry, tickets,deadline)
+    rt.spawn(name, sched, entry, tickets, deadline)
 }
 
 pub fn my_thread_end() -> ThreadSignal {
@@ -259,6 +336,101 @@ pub fn my_thread_end() -> ThreadSignal {
 
 pub fn my_thread_yield() -> ThreadSignal {
     ThreadSignal::Yield
+}
+
+// bloquea al hilo actual hasta que el objetivo termine
+// si el objetivo ya termino devuelve yield para que el llamante continue
+// si el objetivo esta detached devuelve yield y no se bloquea
+// si el objetivo no existe devuelve yield
+pub fn my_thread_join(rt: &mut ThreadRuntime, target: ThreadId) -> ThreadSignal {
+    // obtener hilo actual
+    let Some(self_tid) = rt.current() else {
+        // si no hay hilo actual no podemos bloquear
+        return ThreadSignal::Yield;
+    };
+
+    // leer estado del objetivo
+    let mut should_block = false;
+    let mut can_join = true;
+
+    if let Some(t) = rt.threads.get(&target) {
+        if t.detached {
+            can_join = false;
+        } else if t.state != ThreadState::Terminated {
+            should_block = true;
+        }
+    } else {
+        can_join = false;
+    }
+
+    if !can_join {
+        return ThreadSignal::Yield;
+    }
+
+    if should_block {
+        // registrar al actual como joiner del objetivo
+        if let Some(t) = rt.threads.get_mut(&target) {
+            t.joiners.push(self_tid);
+        }
+        // senal para bloquear al actual
+        return ThreadSignal::Block;
+    }
+
+    // si ya esta terminado no bloqueamos
+    ThreadSignal::Yield
+}
+
+// marca un hilo como detached
+// si ya termino se limpia su control block
+pub fn my_thread_detach(rt: &mut ThreadRuntime, target: ThreadId) {
+    if let Some(t) = rt.threads.get_mut(&target) {
+        t.detached = true;
+        if t.state == ThreadState::Terminated {
+            // limpiar inmediatamente si ya termino
+            rt.threads.remove(&target);
+        }
+    }
+}
+
+/* =========
+ * mutex minimo con init y destroy
+ * ========= */
+
+// estructura de mutex pensada para extender con lock y unlock
+pub struct MyMutex {
+    initialized: bool,
+    locked: bool,
+    _owner: Option<ThreadId>,       // guion bajo para indicar que aun no se usa
+    wait_queue: VecDeque<ThreadId>,
+}
+
+impl MyMutex {
+    // inicializa el mutex
+    pub fn my_mutex_init() -> Self {
+        Self {
+            initialized: true,
+            locked: false,
+            _owner: None,
+            wait_queue: VecDeque::new(),
+        }
+    }
+
+    // destruye el mutex
+    // devuelve 0 si exito y 1 si no se puede destruir
+    // no se permite destruir si esta bloqueado o si no estaba inicializado
+    pub fn my_mutex_destroy(&mut self) -> i32 {
+        if !self.initialized {
+            return 1;
+        }
+        if self.locked {
+            return 1;
+        }
+        if !self.wait_queue.is_empty() {
+            return 1;
+        }
+        self.initialized = false;
+        0
+    }
 }
 
 #[cfg(test)]
@@ -273,11 +445,11 @@ mod tests {
         let a_count = Arc::new(Mutex::new(0));
         let b_count = Arc::new(Mutex::new(0));
 
-        // Hilo A
+        // hilo a
         let a_count_clone = Arc::clone(&a_count);
         let a = my_thread_create(
             &mut rt,
-            "A",
+            "a",
             SchedulerType::RoundRobin,
             Box::new(move |_rt, _tid| {
                 let mut cnt = a_count_clone.lock().unwrap();
@@ -291,11 +463,11 @@ mod tests {
             None,
         );
 
-        // Hilo B
+        // hilo b
         let b_count_clone = Arc::clone(&b_count);
         let _b = my_thread_create(
             &mut rt,
-            "B",
+            "b",
             SchedulerType::RoundRobin,
             Box::new(move |_rt, _tid| {
                 let mut cnt = b_count_clone.lock().unwrap();
@@ -311,7 +483,7 @@ mod tests {
 
         rt.run(10);
 
-        // Comprobamos que los hilos terminaron
+        // verificacion basica
         assert_eq!(rt.threads.get(&a).unwrap().state, ThreadState::Terminated);
         assert_eq!(*a_count.lock().unwrap(), 3);
         assert_eq!(*b_count.lock().unwrap(), 2);
@@ -324,10 +496,10 @@ mod tests {
         let a_count = Arc::new(Mutex::new(0));
         let b_count = Arc::new(Mutex::new(0));
 
-        // Hilo A con 3 tickets
+        // hilo a con 3 tickets
         let a_count_clone = Arc::clone(&a_count);
         let _a = rt.spawn(
-            "A",
+            "a",
             SchedulerType::Lottery,
             Box::new(move |_rt, _tid| {
                 let mut cnt = a_count_clone.lock().unwrap();
@@ -338,10 +510,10 @@ mod tests {
             None,
         );
 
-        // Hilo B con 1 ticket
+        // hilo b con 1 ticket
         let b_count_clone = Arc::clone(&b_count);
         let _b = rt.spawn(
-            "B",
+            "b",
             SchedulerType::Lottery,
             Box::new(move |_rt, _tid| {
                 let mut cnt = b_count_clone.lock().unwrap();
@@ -352,49 +524,50 @@ mod tests {
             None,
         );
 
-        // Ejecutar muchos ciclos
+        // ejecutar muchos ciclos
         rt.run(1000);
 
         let a_total = *a_count.lock().unwrap();
         let b_total = *b_count.lock().unwrap();
 
-        println!("A ran {} times, B ran {} times", a_total, b_total);
+        println!("a ran {} times, b ran {}", a_total, b_total);
 
         assert!(a_total > b_total);
     }
-    #[test]
-    fn realtime_scheduler_runs_earliest_deadline_first() {
-        use std::sync::{Arc, Mutex};
 
+    #[test]
+    fn realtime_scheduler_runs_earliest_deadline_first_with_clock() {
         let mut rt = ThreadRuntime::new();
         let order = Arc::new(Mutex::new(Vec::new()));
 
-        // Hilo con deadline más lejano
+        // hilo con deadline mas lejano
         let order_low = Arc::clone(&order);
         let entry_low: ThreadEntry = Box::new(move |_rt, _tid| {
-            order_low.lock().unwrap().push("Low".to_string());
+            order_low.lock().unwrap().push("low".to_string());
             my_thread_end()
         });
 
-        // Hilo con deadline más cercano (más urgente)
+        // hilo con deadline mas cercano
         let order_high = Arc::clone(&order);
         let entry_high: ThreadEntry = Box::new(move |_rt, _tid| {
-            order_high.lock().unwrap().push("High".to_string());
+            order_high.lock().unwrap().push("high".to_string());
             my_thread_end()
         });
 
-        // Crear los hilos usando my_thread_create con scheduler RealTime
-        // Suponiendo que my_thread_create ahora recibe deadline como Option<i32>
-        my_thread_create(&mut rt, "Low", SchedulerType::RealTime, entry_low, None, Some(20));  // menos urgente
-        my_thread_create(&mut rt, "High", SchedulerType::RealTime, entry_high, None, Some(5)); // más urgente
+        my_thread_create(&mut rt, "low", SchedulerType::RealTime, entry_low, None, Some(50));
+        my_thread_create(&mut rt, "high", SchedulerType::RealTime, entry_high, None, Some(10));
 
-        // Ejecutar el runtime
-        rt.run(2);
+        rt.advance_time(0);
+        rt.run_once();
 
-        // Verificar orden de ejecución
         let seq = order.lock().unwrap().clone();
-        println!("Execution order: {:?}", seq);
-        assert_eq!(seq[0], "High", "El hilo con el menor deadline debe ejecutarse primero");
+        assert_eq!(seq[0], "high");
     }
 
+    #[test]
+    fn mutex_init_destroy() {
+        let mut m = MyMutex::my_mutex_init();
+        assert_eq!(m.my_mutex_destroy(), 0);
+    }
 }
+
