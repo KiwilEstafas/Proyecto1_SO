@@ -7,11 +7,20 @@ use mypthreads::{
 // uso temporal solo en las demos para proteger contadores compartidos
 // esto viene de la libreria estandar y no es parte de mypthreads
 // se reemplazara por el mymutex implementado en la libreria
-use std::sync::{Arc, Mutex}; // NOTAAA
+use std::sync::{Arc, Mutex};
+
+// capa ffi con firmas tipo pthreads
+use std::ffi::c_void;
+use mypthreads::ffi as myffi;
+
+// rutina de ejemplo con firma c para la capa ffi
+extern "C" fn c_worker(arg: *mut c_void) -> *mut c_void {
+    println!("[c worker] start arg={:?}", arg);
+    arg
+}
 
 fn demo_round_robin() {
     println!("\n=== demo round robin ===");
-    // crea runtime
     let mut rt = ThreadRuntime::new();
 
     // hilo a imprime 3 veces y termina
@@ -25,9 +34,7 @@ fn demo_round_robin() {
             let mut v = a_count_cl.lock().unwrap();
             *v += 1;
             println!("[a] step {}", *v);
-            if *v >= 3 {
-                return my_thread_end();
-            }
+            if *v >= 3 { return my_thread_end(); }
             my_thread_yield()
         }),
         None,
@@ -45,9 +52,7 @@ fn demo_round_robin() {
             let mut v = b_count_cl.lock().unwrap();
             *v += 1;
             println!("[b] step {}", *v);
-            if *v >= 2 {
-                return ThreadSignal::Exit;
-            }
+            if *v >= 2 { return ThreadSignal::Exit; }
             my_thread_yield()
         }),
         None,
@@ -57,9 +62,6 @@ fn demo_round_robin() {
     // bucle simple sin tiempo porque rr no lo requiere
     for _ in 0..10 {
         rt.run_once();
-        if rt.now() == u64::MAX {
-            break;
-        }
     }
 
     println!("rr listo\n");
@@ -79,12 +81,8 @@ fn demo_lottery() {
         Box::new(move |_rt, _tid| {
             let mut v = x_count_cl.lock().unwrap();
             *v += 1;
-            if *v % 10 == 0 {
-                println!("[x 5 tickets] ran {}", *v);
-            }
-            if *v >= 50 {
-                return my_thread_end();
-            }
+            if *v % 10 == 0 { println!("[x 5 tickets] ran {}", *v); }
+            if *v >= 50 { return my_thread_end(); }
             my_thread_yield()
         }),
         Some(5),
@@ -101,9 +99,7 @@ fn demo_lottery() {
         Box::new(move |_rt, _tid| {
             let mut v = y_count_cl.lock().unwrap();
             *v += 1;
-            if *v >= 30 {
-                return my_thread_end();
-            }
+            if *v >= 30 { return my_thread_end(); }
             my_thread_yield()
         }),
         Some(2),
@@ -120,21 +116,15 @@ fn demo_lottery() {
         Box::new(move |_rt, _tid| {
             let mut v = z_count_cl.lock().unwrap();
             *v += 1;
-            if *v >= 20 {
-                return my_thread_end();
-            }
+            if *v >= 20 { return my_thread_end(); }
             my_thread_yield()
         }),
         Some(1),
         None,
     );
 
-    // correr varios ciclos
     for _ in 0..200 {
         rt.run_once();
-        if rt.now() == u64::MAX {
-            break;
-        }
     }
 
     let xv = *x_count.lock().unwrap();
@@ -174,11 +164,9 @@ fn demo_realtime_single_shot() {
         Some(10),
     );
 
-    // avanzar tiempo 0 y correr una vez
     rt.advance_time(0);
     rt.run_once(); // deberia correr high primero
 
-    // avanzar tiempo y correr otra vez
     rt.advance_time(5);
     rt.run_once(); // deberia correr low ahora
 
@@ -188,9 +176,6 @@ fn demo_realtime_single_shot() {
 fn demo_realtime_periodic() {
     println!("=== demo realtime periodico simple ===");
     let mut rt = ThreadRuntime::new();
-
-    // este ejemplo simula dos tareas con deadlines periodicos calculados fuera
-    // como no tenemos period en mythread se reprograman a mano desde el bucle
 
     // contadores compartidos
     let t1_count = Arc::new(Mutex::new(0));
@@ -229,16 +214,15 @@ fn demo_realtime_periodic() {
     );
 
     // bucle de 5 ticks con dt 10 ms
-    // reprograma manualmente cada tarea al terminar dandole un nuevo deadline absoluto
     for step in 0..5 {
         rt.advance_time(10);
         rt.run_once();
 
-        // si t1 termino hayq ue recrealro con deadline actual mas periodo 20
+        // si t1 termino recrearlo con deadline actual + 20
         if let Some(th) = rt.threads.get(&1) {
             if th.state == mypthreads::ThreadState::Terminated {
                 let t1c2 = Arc::clone(&t1_count);
-                let next_deadline = rt.now() + 20; // leer now antes de pasar &mut rt
+                let next_deadline = rt.now() + 20;
                 my_thread_create(
                     &mut rt,
                     "t1",
@@ -255,11 +239,11 @@ fn demo_realtime_periodic() {
             }
         }
 
-        // si t2 termino hay que recrearlo con deadline actual mas periodo 30
+        // si t2 termino recrearlo con deadline actual + 30
         if let Some(th) = rt.threads.get(&2) {
             if th.state == mypthreads::ThreadState::Terminated {
                 let t2c2 = Arc::clone(&t2_count);
-                let next_deadline = rt.now() + 30; // leer now antes de pasar &mut rt
+                let next_deadline = rt.now() + 30;
                 my_thread_create(
                     &mut rt,
                     "t2",
@@ -284,15 +268,12 @@ fn demo_realtime_periodic() {
 
 fn demo_join_detach() {
     println!("\n=== demo join y detach ===");
-
-    // crear runtime
     let mut rt = ThreadRuntime::new();
 
-    // contador compartido para el worker
     let work_count = Arc::new(Mutex::new(0));
     let work_count_cl = Arc::clone(&work_count);
 
-    // hilo worker que hace dos pasos y termina
+    // worker hace dos pasos y termina
     let worker_tid = my_thread_create(
         &mut rt,
         "worker",
@@ -301,35 +282,26 @@ fn demo_join_detach() {
             let mut c = work_count_cl.lock().unwrap();
             *c += 1;
             println!("[worker] step {}", *c);
-            if *c >= 2 {
-                return my_thread_end();
-            }
+            if *c >= 2 { return my_thread_end(); }
             my_thread_yield()
         }),
         None,
         None,
     );
 
-    // bandera para imprimir solo una vez cuando el watcher retoma
+    // watcher que espera al worker
     let resumed = Arc::new(Mutex::new(false));
     let resumed_cl = Arc::clone(&resumed);
-
-    // hilo watcher que hace join al worker
     my_thread_create(
         &mut rt,
         "watcher",
         SchedulerType::RoundRobin,
         Box::new(move |rt, _tid| {
-            // intentar join
             let sig = my_thread_join(rt, worker_tid);
-
-            // si se bloqueo devolver block para que el runtime lo estacione
             if let ThreadSignal::Block = sig {
                 println!("[watcher] esperando a worker");
                 return ThreadSignal::Block;
             }
-
-            // si no se bloqueo entonces worker ya termino
             let mut r = resumed_cl.lock().unwrap();
             if !*r {
                 *r = true;
@@ -341,7 +313,7 @@ fn demo_join_detach() {
         None,
     );
 
-    // crear un hilo corto que vamos a marcar como detached antes de correr
+    // hilo corto que marcamos detached
     let short_count = Arc::new(Mutex::new(0));
     let short_count_cl = Arc::clone(&short_count);
     let shorty_tid = my_thread_create(
@@ -352,40 +324,72 @@ fn demo_join_detach() {
             let mut c = short_count_cl.lock().unwrap();
             *c += 1;
             println!("[shorty] step {}", *c);
-            if *c >= 1 {
-                return my_thread_end();
-            }
+            if *c >= 1 { return my_thread_end(); }
             my_thread_yield()
         }),
         None,
         None,
     );
 
-    // marcar shorty como detached antes de ejecutar
     my_thread_detach(&mut rt, shorty_tid);
     println!("[main] shorty marcado como detached tid={}", shorty_tid);
 
-    // correr suficientes ciclos para que worker termine y watcher retome
     rt.run(100);
 
-    // verificar que shorty fue eliminado del mapa de hilos al terminar por estar detached
     let exists = rt.threads.contains_key(&shorty_tid);
     println!("[main] shorty sigue presente en tabla de hilos = {}", exists);
     println!("demo join y detach lista\n");
 }
 
+// demo que usa la capa ffi con firmas estilo pthreads
+fn demo_pthreads_facade() {
+    use std::mem::MaybeUninit;
+    use std::ptr;
+
+    println!("\n=== demo capa ffi estilo pthreads ===");
+
+    // crear hilo y esperar su retorno void*
+    let mut tid: myffi::my_thread_t = 0;
+    let rc_create = myffi::my_thread_create(
+        &mut tid as *mut myffi::my_thread_t,
+        ptr::null(),
+        c_worker,
+        123 as *mut c_void,
+    );
+    println!("[ffi] create rc={} tid={}", rc_create, tid);
+
+    let mut retval: *mut c_void = ptr::null_mut();
+    let rc_join = myffi::my_thread_join(tid, &mut retval as *mut *mut c_void);
+    println!("[ffi] join rc={} retval={:?}", rc_join, retval);
+
+    let mut m = MaybeUninit::<myffi::my_mutex_t>::uninit();
+    let rc_mi = myffi::my_mutex_init(m.as_mut_ptr(), ptr::null());
+    assert_eq!(rc_mi, 0, "mutex init fallo");
+
+    // ya inicializado, es seguro asumir init
+    let mut m = unsafe { m.assume_init() };
+    let rc_md = myffi::my_mutex_destroy(&mut m as *mut myffi::my_mutex_t);
+    println!("[ffi] mutex init rc={} destroy rc={}", rc_mi, rc_md);
+
+    // detach sobre un tid inexistente devuelve error no cero
+    let rc_det = myffi::my_thread_detach(9999);
+    println!("[ffi] detach rc={}", rc_det);
+
+    println!("demo ffi lista\n");
+}
 
 fn main() {
     println!("threadcity schedulers demo");
 
     demo_round_robin();
-     demo_lottery();
+    demo_lottery();
     demo_realtime_single_shot();
     demo_realtime_periodic();
-
     demo_join_detach();
+
+    // demo extra para verificar la capa de firmas pthread
+    demo_pthreads_facade();
 
     println!("todas las demos completadas");
 }
-
 
