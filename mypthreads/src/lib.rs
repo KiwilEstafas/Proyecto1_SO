@@ -14,7 +14,8 @@ pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
 pub use signals::ThreadSignal;
 pub use api_rust::{
     my_thread_create, my_thread_end, my_thread_yield,
-    my_thread_join, my_thread_detach,
+    my_thread_join, my_thread_detach, my_thread_chsched, 
+    my_mutex_lock, my_mutex_unlock, my_mutex_trylock
 };
 pub use mutex::MyMutex;
 

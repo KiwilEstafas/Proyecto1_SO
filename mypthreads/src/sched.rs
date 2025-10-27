@@ -21,6 +21,9 @@ impl ThreadRuntime {
         }
 
         let total_tickets: u32 = ready_threads.iter().map(|t| t.tickets).sum();
+        if total_tickets == 0{
+            return self.schedule_roundrobin();
+        }
         let mut rng = rand::rng();
         let mut pick: u32 = rng.random_range(0..total_tickets);
 

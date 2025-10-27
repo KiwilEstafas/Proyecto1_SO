@@ -1,6 +1,7 @@
 //! capa con firmas equivalentes a pthreads
 //! expone funciones extern c que operan sobre el mismo runtime interno
 //! esto permite compatibilidad con firmas tipo pthreads sin romper la api rust
+//! ESTO SE VA A ELIMINAR A FUTURO POSIBLEMENTEEEEEEE
 
 use std::cell::RefCell;
 use std::ffi::c_void;

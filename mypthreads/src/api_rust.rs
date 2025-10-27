@@ -4,6 +4,7 @@
 use crate::runtime::ThreadRuntime;
 use crate::signals::ThreadSignal;
 use crate::thread::{SchedulerType, ThreadEntry, ThreadId, ThreadState};
+use crate::mutex::MyMutex;
 
 pub fn my_thread_create(
     rt: &mut ThreadRuntime,
@@ -72,3 +73,57 @@ pub fn my_thread_detach(rt: &mut ThreadRuntime, target: ThreadId) {
     }
 }
 
+pub fn my_mutex_lock(rt: &mut ThreadRuntime, mutex: &mut MyMutex) -> ThreadSignal{
+    let Some(tid) = rt.current() else {
+        return  ThreadSignal::Yield;
+    };
+
+    if mutex.my_mutex_lock(tid){
+        ThreadSignal::Block
+    } else {
+        ThreadSignal::Continue
+    }
+}
+
+pub fn my_mutex_unlock(rt: &mut ThreadRuntime, mutex: &mut MyMutex) -> ThreadSignal{
+    let Some(tid) = rt.current() else {
+        return ThreadSignal::Yield;
+    };
+
+    if let Some(next_tid) = mutex.my_mutex_unlock(tid){
+        rt.wake(next_tid);
+    }
+    ThreadSignal::Continue
+    
+}
+
+pub fn my_mutex_trylock(rt: &mut ThreadRuntime, mutex: &mut MyMutex) -> ThreadSignal {
+    let Some(tid) = rt.current() else {
+        return ThreadSignal::Yield;
+    };
+
+    if mutex.my_mutex_trylock(tid){
+        ThreadSignal::Continue
+    } else {
+        ThreadSignal::Yield
+    }
+
+}
+
+pub fn my_thread_chsched( rt: &mut ThreadRuntime, target: ThreadId, new_sched: SchedulerType, tickets: Option<u32>, deadline: Option<u64>) -> bool {
+    if let Some(t) = rt.threads.get_mut(&target) {
+        t.sched_type = new_sched;
+
+        if let Some(tix) = tickets{
+            t.tickets = tix;
+        }
+
+        if let Some(dl) = deadline{
+            t.deadline = Some(dl);
+        }
+
+        true 
+    } else {
+        false
+    }
+}
