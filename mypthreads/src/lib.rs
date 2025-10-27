@@ -7,7 +7,6 @@ pub mod sched;
 pub mod signals;
 pub mod api_rust;
 pub mod mutex;
-pub mod ffi;
 
 pub use runtime::ThreadRuntime;
 pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
