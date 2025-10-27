@@ -19,6 +19,14 @@ impl<T: Agent + Any + 'static> AgentDowncast for T {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentState {
+    Traveling,
+    WaitingForBridge,
+    CrossingBridge,
+    Arrived,
+}
+
 #[derive(Debug, Clone)]
 pub struct Vehicle {
     pub id: u32,
@@ -27,7 +35,9 @@ pub struct Vehicle {
     pub destination: Coord,
     pub speed: f32,
     pub priority: u8,
+    pub stage: AgentState
 }
+
 
 impl Vehicle {
     pub fn new(id: u32, origin: Coord, destination: Coord) -> Self {
@@ -38,6 +48,7 @@ impl Vehicle {
             destination,
             speed: 1.0,
             priority: 0,
+            stage: AgentState::Traveling
         }
     }
 
