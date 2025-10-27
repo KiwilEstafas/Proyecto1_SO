@@ -4,7 +4,7 @@ mod ambulance;
 mod boat;
 mod cargotruck;
 
-pub use vehicle::{Agent, AgentDowncast, Vehicle};
+pub use vehicle::{Agent, AgentDowncast, Vehicle, AgentState};
 pub use car::Car;
 pub use ambulance::Ambulance;
 pub use boat::Boat;

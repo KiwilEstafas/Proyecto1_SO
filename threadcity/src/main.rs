@@ -3,13 +3,13 @@ use std::cell::RefCell;
 
 // Importa los componentes de tu simulación del crate `threadcity`
 use threadcity::sim::City;
-use threadcity::agents::{Agent, AgentDowncast, Car, Ambulance, Boat, CargoTruck};
-use threadcity::model::{Coord, DeadlinePolicy, SupplyKind, SupplySpec};
+use threadcity::agents::{Agent, AgentDowncast, AgentState, Car, Ambulance, Boat};
 
 // --- ¡IMPORTACIONES CLAVE DE TU BIBLIOTECA MYPTHREADS! ---
 use mypthreads::runtime::ThreadRuntime;
 use mypthreads::thread::{SchedulerType, ThreadEntry};
 use mypthreads::api_rust::*; // Importamos las funciones amigables como my_thread_create
+use mypthreads::signals::ThreadSignal;
 
 fn main() {
     println!("--- Iniciando simulación de ThreadCity con mypthreads ---");
@@ -57,33 +57,82 @@ fn main() {
         let agent_name = format!("Agent-{}", agent.id());
         let thread_name_for_creation = agent_name.clone();
 
+        let mut state = AgentState::Traveling;
+        let mut crossing_progress = 0u32;
+
         let agent_logic: ThreadEntry = Box::new(move |rt, _| {
             // --- ¡ESTA ES LA "VIDA" DE UN AGENTE! ---
             
-            // Lógica de interacción con el puente (ejemplo para coches)
-            // Asumimos que el río está en la columna Y=10 y el puente conecta Y=9 con Y=11
-            if let Some(car) = agent.as_any().downcast_ref::<Car>() {
-                 if car.pos().y == 9 {
-                     println!("[{}] en la entrada del puente (pos: {:?}). Intentando cruzar...", agent_name, car.pos());
-                     
-                     // Pedimos prestado el estado de la ciudad para interactuar con él
-                     let mut city = city_clone.borrow_mut();
-                     let bridge = &mut city.bridges[0];
+            match state {
+                AgentState::Traveling => {
+                    // Verificar si llegó a destino
+                    if let Some(car) = agent.as_any().downcast_ref::<Car>() {
+                        if car.pos().x >= 10 {
+                            println!("[{}] LLEGÓ a destino", agent_name);
+                            return ThreadSignal::Exit;
+                        }
+                    }
+                    
+                    // Lógica de interacción con el puente (ejemplo para coches)
+                    // Asumimos que el río está en la columna Y=10 y el puente conecta Y=9 con Y=11
+                    if let Some(car) = agent.as_any().downcast_ref::<Car>() {
+                         if car.pos().y == 9 {
+                             println!("[{}] en la entrada del puente (pos: {:?})", agent_name, car.pos());
+                             state = AgentState::WaitingForBridge;
+                             return my_thread_yield();
+                         }
+                    }
+                    
+                    // El agente se mueve un paso si no está interactuando con nada.
+                    agent.step(100);
+                    my_thread_yield()
+                }
+                
+                AgentState::WaitingForBridge => {
+                    println!("[{}] Intentando cruzar...", agent_name);
+                    
+                    // Pedimos prestado el estado de la ciudad para interactuar con él
+                    let mut city = city_clone.borrow_mut();
+                    let bridge = &mut city.bridges[0];
 
-                     // Esta es la interacción clave: el hilo intenta usar un recurso compartido.
-                     // Si el puente está lleno o bloqueado, esta llamada devolverá `Block`,
-                     // y el runtime pondrá este hilo a dormir.
-                     return bridge.request_pass_vehicle(rt);
-                 }
+                    // Esta es la interacción clave: el hilo intenta usar un recurso compartido.
+                    // Si el puente está lleno o bloqueado, esta llamada devolverá `Block`,
+                    // y el runtime pondrá este hilo a dormir.
+                    let signal = bridge.request_pass_vehicle(rt);
+                    
+                    if signal == ThreadSignal::Continue {
+                        state = AgentState::CrossingBridge;
+                        crossing_progress = 0;
+                        my_thread_yield()
+                    } else {
+                        signal
+                    }
+                }
+                
+                AgentState::CrossingBridge => {
+                    crossing_progress += 1;
+                    
+                    // El agente avanza mientras cruza
+                    agent.step(100);
+                    
+                    // Después de 3 ticks, terminó de cruzar
+                    if crossing_progress >= 3 {
+                        println!("[{}] Terminó de cruzar, liberando puente", agent_name);
+                        
+                        let mut city = city_clone.borrow_mut();
+                        let bridge = &mut city.bridges[0];
+                        bridge.release_pass_vehicle(rt);
+                        
+                        state = AgentState::Traveling;
+                    }
+                    
+                    my_thread_yield()
+                }
+                
+                AgentState::Arrived => {
+                    ThreadSignal::Exit
+                }
             }
-            
-            // El agente se mueve un paso si no está interactuando con nada.
-            agent.step(100); 
-
-            // (Aquí iría la lógica para liberar el puente una vez cruzado)
-
-            // Si no hemos hecho nada que nos bloquee o nos termine, cedemos el control.
-            my_thread_yield()
         });
 
         // Creamos el hilo en nuestro runtime.
