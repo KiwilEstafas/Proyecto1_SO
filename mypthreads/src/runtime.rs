@@ -147,7 +147,7 @@ impl ThreadRuntime {
     }
 
     // despertar hilo bloqueado
-    pub(crate) fn wake(&mut self, tid: ThreadId) {
+    pub fn wake(&mut self, tid: ThreadId) {
         if let Some(t) = self.threads.get_mut(&tid) {
             t.state = ThreadState::Ready;
         }
@@ -155,7 +155,7 @@ impl ThreadRuntime {
     }
 
     // obtener el tid del hilo actual si existe
-    pub(crate) fn current(&self) -> Option<ThreadId> {
+    pub fn current(&self) -> Option<ThreadId> {
         self.current_tid
     }
 }

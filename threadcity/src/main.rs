@@ -1,104 +1,103 @@
 use std::rc::Rc;
 use std::cell::RefCell;
 
-// Importa los componentes de tu simulación del crate `threadcity`
-use threadcity::sim::City;
-use threadcity::agents::{Agent, AgentDowncast, AgentState, Car, Ambulance, Boat};
+use threadcity::cityconfig::create_threadcity;
+use threadcity::agents::{AgentDowncast, AgentState, Car, Ambulance, Boat};
 
-// --- ¡IMPORTACIONES CLAVE DE TU BIBLIOTECA MYPTHREADS! ---
 use mypthreads::runtime::ThreadRuntime;
 use mypthreads::thread::{SchedulerType, ThreadEntry};
-use mypthreads::api_rust::*; // Importamos las funciones amigables como my_thread_create
+use mypthreads::api_rust::*;
 use mypthreads::signals::ThreadSignal;
 
 fn main() {
-    println!("--- Iniciando simulación de ThreadCity con mypthreads ---");
+    println!("╔════════════════════════════════════════════════════════════╗");
+    println!("║           ThreadCity con MyPthreads                        ║");
+    println!("╚════════════════════════════════════════════════════════════╝\n");
 
-    // ===================================================================
-    // PASO 1: CREAR EL RUNTIME Y EL ESTADO COMPARTIDO DE LA CIUDAD
-    // ===================================================================
-    // El ThreadRuntime será el "kernel" que gestiona todos nuestros hilos-agentes.
+    let (city, layout) = create_threadcity();
+    let shared_city = Rc::new(RefCell::new(city));
     let mut runtime = ThreadRuntime::new();
 
-    // Creamos la ciudad base. Ya no contendrá a los agentes directamente.
-    // Se convierte en el "mundo" que los hilos observarán y modificarán.
-    let city = City::new(20, 30); // grid 20x30
-    
-    // Envolvemos la ciudad en `Rc<RefCell<T>>` para poder compartirla de forma
-    // segura y mutable entre todos nuestros hilos cooperativos.
-    let shared_city = Rc::new(RefCell::new(city));
-
-    // Añadimos puentes y otros elementos al estado compartido de la ciudad.
-    {
-        let mut city_ref = shared_city.borrow_mut();
-        city_ref.add_commerce(1, (5, 5));
-        city_ref.add_bridge(1, 2); // Puente con ID 1 y 2 carriles
-    }
-
-
-    // ===================================================================
-    // PASO 2: CREAR LOS AGENTES Y "SPAWNEARLOS" COMO MYPTHREADS
-    // ===================================================================
-    // Ya no hacemos `city.add_agent(...)`. En su lugar, por cada agente,
-    // creamos un mypthread que se encargará de su ciclo de vida.
-
-    // Definimos una lista de agentes que queremos en la simulación.
+    // Grid 5x5, río en columna 2, puentes en filas 1, 2, 3
     let agents_to_spawn: Vec<Box<dyn AgentDowncast + Send>> = vec![
-        Box::new(Car::new(100, (0, 9), (10, 9))),
-        Box::new(Car::new(101, (1, 9), (12, 9))),
-        Box::new(Ambulance::new(200, (1, 0), (19, 12))),
-        Box::new(Boat::new(300, (5, 0), (5, 19))),
+        Box::new(Car::new(100, (0, layout.bridge1_row), (4, layout.bridge1_row))),
+        Box::new(Car::new(101, (0, layout.bridge2_row), (4, layout.bridge2_row))),
+        Box::new(Ambulance::new(200, (0, layout.bridge3_row), (4, layout.bridge3_row))),
+        Box::new(Boat::new(300, (layout.bridge2_row, 0), (layout.bridge2_row, 4))),
     ];
 
     for mut agent in agents_to_spawn {
         let city_clone = shared_city.clone();
-        
-        // Creamos un nombre para el hilo y lo clonamos para evitar problemas de ownership.
         let agent_name = format!("Agent-{}", agent.id());
-        let thread_name_for_creation = agent_name.clone();
+        let thread_name = agent_name.clone();
 
         let mut state = AgentState::Traveling;
         let mut crossing_progress = 0u32;
+        let river_col = layout.river_column;
+        let is_boat = agent.as_any().downcast_ref::<Boat>().is_some();
 
         let agent_logic: ThreadEntry = Box::new(move |rt, _| {
-            // --- ¡ESTA ES LA "VIDA" DE UN AGENTE! ---
+            let pos = agent.pos();
             
             match state {
                 AgentState::Traveling => {
-                    // Verificar si llegó a destino
-                    if let Some(car) = agent.as_any().downcast_ref::<Car>() {
-                        if car.pos().x >= 10 {
-                            println!("[{}] LLEGÓ a destino", agent_name);
-                            return ThreadSignal::Exit;
-                        }
+                    // Condición de llegada genérica
+                    let arrived = if is_boat {
+                        pos.y >= 4 // Barco navega en Y, llega a columna 4
+                    } else {
+                        pos.x >= 4 // Carros/ambulancias en X, llegan a fila 4
+                    };
+                    
+                    if arrived {
+                        println!("[{}]  LLEGÓ a destino (pos: {:?})", agent_name, pos);
+                        return ThreadSignal::Exit;
                     }
                     
-                    // Lógica de interacción con el puente (ejemplo para coches)
-                    // Asumimos que el río está en la columna Y=10 y el puente conecta Y=9 con Y=11
-                    if let Some(car) = agent.as_any().downcast_ref::<Car>() {
-                         if car.pos().y == 9 {
-                             println!("[{}] en la entrada del puente (pos: {:?})", agent_name, car.pos());
-                             state = AgentState::WaitingForBridge;
-                             return my_thread_yield();
-                         }
+                    // Detectar entrada al puente (justo antes del río en columna 2)
+                    let at_bridge = if is_boat {
+                        // Barco detecta puente por columna Y
+                        pos.y == river_col - 1
+                    } else {
+                        // Carros/ambulancias por fila X
+                        pos.x == river_col - 1
+                    };
+                    
+                    if at_bridge {
+                        let vehicle_type = if is_boat { " Barco" } 
+                            else if agent.as_any().downcast_ref::<Ambulance>().is_some() { "🚑 Ambulancia" }
+                            else { "🚗 Carro" };
+                        println!("[{}] {} en entrada del puente (pos: {:?})", agent_name, vehicle_type, pos);
+                        state = AgentState::WaitingForBridge;
+                        return my_thread_yield();
                     }
                     
-                    // El agente se mueve un paso si no está interactuando con nada.
                     agent.step(100);
                     my_thread_yield()
                 }
                 
                 AgentState::WaitingForBridge => {
-                    println!("[{}] Intentando cruzar...", agent_name);
+                    println!("[{}]  Intentando cruzar puente...", agent_name);
                     
-                    // Pedimos prestado el estado de la ciudad para interactuar con él
                     let mut city = city_clone.borrow_mut();
-                    let bridge = &mut city.bridges[0];
-
-                    // Esta es la interacción clave: el hilo intenta usar un recurso compartido.
-                    // Si el puente está lleno o bloqueado, esta llamada devolverá `Block`,
-                    // y el runtime pondrá este hilo a dormir.
-                    let signal = bridge.request_pass_vehicle(rt);
+                    
+                    // Determinar qué puente usar
+                    let bridge_idx = if is_boat {
+                        1 // Barco usa puente 2 (índice 1)
+                    } else {
+                        let y = pos.y;
+                        if y == layout.bridge1_row { 0 }
+                        else if y == layout.bridge2_row { 1 }
+                        else { 2 }
+                    };
+                    
+                    let bridge = &mut city.bridges[bridge_idx];
+                    
+                    // Barco usa request_pass_boat, otros usan request_pass_vehicle
+                    let signal = if is_boat {
+                        bridge.request_pass_boat(rt)
+                    } else {
+                        bridge.request_pass_vehicle(rt)
+                    };
                     
                     if signal == ThreadSignal::Continue {
                         state = AgentState::CrossingBridge;
@@ -111,17 +110,29 @@ fn main() {
                 
                 AgentState::CrossingBridge => {
                     crossing_progress += 1;
-                    
-                    // El agente avanza mientras cruza
                     agent.step(100);
                     
-                    // Después de 3 ticks, terminó de cruzar
-                    if crossing_progress >= 3 {
-                        println!("[{}] Terminó de cruzar, liberando puente", agent_name);
+                    if crossing_progress >= 2 {
+                        println!("[{}]  Terminó de cruzar, liberando puente", agent_name);
                         
                         let mut city = city_clone.borrow_mut();
-                        let bridge = &mut city.bridges[0];
-                        bridge.release_pass_vehicle(rt);
+                        
+                        let bridge_idx = if is_boat {
+                            1
+                        } else {
+                            let y = pos.y;
+                            if y == layout.bridge1_row { 0 }
+                            else if y == layout.bridge2_row { 1 }
+                            else { 2 }
+                        };
+                        
+                        let bridge = &mut city.bridges[bridge_idx];
+                        
+                        if is_boat {
+                            bridge.release_pass_boat(rt);
+                        } else {
+                            bridge.release_pass_vehicle(rt);
+                        }
                         
                         state = AgentState::Traveling;
                     }
@@ -135,37 +146,30 @@ fn main() {
             }
         });
 
-        // Creamos el hilo en nuestro runtime.
-        my_thread_create(&mut runtime, &thread_name_for_creation, SchedulerType::RoundRobin, agent_logic, None, None);
+        my_thread_create(&mut runtime, &thread_name, SchedulerType::RoundRobin, agent_logic, None, None);
     }
 
-
-    // ===================================================================
-    // PASO 3: EL BUCLE PRINCIPAL DE LA SIMULACIÓN
-    // ===================================================================
-    // Este bucle reemplaza tu antiguo `for tick in 0..10`.
-    // Ahora, en cada "tick", ejecutamos un paso de UN solo hilo.
     let mut tick = 0;
-    const MAX_TICKS: u32 = 500;
+    const MAX_TICKS: u32 = 200;
 
-    println!("\n--- Corriendo simulación ---");
+    println!("\n--- Corriendo simulación ---\n");
     while !runtime.ready.is_empty() && tick < MAX_TICKS {
-        // Ejecuta el siguiente hilo en la cola 'ready' según el scheduler.
         runtime.run_once();
-        
-        // Avanzamos el reloj lógico de la simulación.
-        runtime.advance_time(10); // Ej: 10ms por cada acción de un agente
+        runtime.advance_time(10);
 
-        if tick % 25 == 0 {
-             println!("\nTick: {}, Hilos activos: {}, Tiempo Sim: {}ms", tick, runtime.ready.len(), runtime.now());
-             // Opcional: Imprimir el estado de los agentes
-             // (Para esto, los agentes deberían estar en un estado compartido también)
+        if tick % 20 == 0 {
+             println!("  Tick: {}, Hilos activos: {}, Tiempo: {}ms", 
+                      tick, runtime.ready.len(), runtime.now());
         }
 
         tick += 1;
-        // std::thread::sleep(std::time::Duration::from_millis(10)); // Descomentar para ralentizar la simulación
     }
 
-    println!("\n--- Simulación finalizada en el tick {} ---", tick);
-    println!("Estado final de la cola 'ready': {}", runtime.ready.len());
+    println!("\n╔════════════════════════════════════════════════════════════╗");
+    println!("║           Simulación Finalizada                           ║");
+    println!("╠════════════════════════════════════════════════════════════╣");
+    println!("║ Ticks totales: {:>43} ║", tick);
+    println!("║ Hilos restantes: {:>40} ║", runtime.ready.len());
+    println!("║ Tiempo simulado: {:>39} ms ║", runtime.now());
+    println!("╚════════════════════════════════════════════════════════════╝\n");
 }
