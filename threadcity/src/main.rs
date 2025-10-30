@@ -23,12 +23,13 @@ fn main() {
     const PLANT1_COORDS: (u32, u32) = (1, 0);
 
     let agents_to_spawn: Vec<Box<dyn AgentDowncast + Send>> = vec![
+        // Todos van por el mismo puente (fila 1)
         Box::new(Car::new(100, (0, layout.bridge1_row), (4, layout.bridge1_row))),
-        Box::new(Car::new(101, (0, layout.bridge2_row), (4, layout.bridge2_row))),
-        Box::new(Ambulance::new(200, (0, layout.bridge3_row), (4, layout.bridge3_row))),
-        Box::new(Boat::new(300, (layout.bridge2_row, 0), (layout.bridge2_row, 4))),
-        Box::new(CargoTruck::new(501, (20, 20), PLANT1_COORDS, SupplyKind::Water)),
+        Box::new(Car::new(101, (0, layout.bridge1_row), (4, layout.bridge1_row))),
+        Box::new(Ambulance::new(200, (0, layout.bridge1_row), (4, layout.bridge1_row))), //  misma fila
+        Box::new(CargoTruck::new(501, (0, layout.bridge1_row), (4, layout.bridge1_row), SupplyKind::Water)),
     ];
+
 
     for mut agent in agents_to_spawn {
         let city_clone = shared_city.clone();
@@ -98,26 +99,38 @@ fn main() {
                     println!("[{}]  Intentando cruzar puente...", agent_name);
                     let mut city = city_clone.borrow_mut();
                     
-                    // --- LÍNEA CORREGIDA ---
+                    // Encontrar el puente más cercano (igual que antes)
                     let nearest_bridge_row = [layout.bridge1_row, layout.bridge2_row, layout.bridge3_row]
                         .iter()
                         .min_by_key(|&&row| (pos.y as i32 - row as i32).abs())
-                        .map(|&val| val)      // Convierte &u32 a u32
-                        .unwrap_or(pos.y);    // Ya no necesita '&'
-                    
-                    // --- LÍNEA CORREGIDA (quitamos el '*') ---
-                    let bridge_idx = if nearest_bridge_row == layout.bridge1_row { 0 } else if nearest_bridge_row == layout.bridge2_row { 1 } else { 2 };
-                    
+                        .map(|&val| val)
+                        .unwrap_or(pos.y);
+
+                    let bridge_idx = if nearest_bridge_row == layout.bridge1_row {
+                        0
+                    } else if nearest_bridge_row == layout.bridge2_row {
+                        1
+                    } else {
+                        2
+                    };
+
                     let bridge = &mut city.bridges[bridge_idx];
-                    let signal = bridge.request_pass_vehicle(rt);
-                    
+
+                    // Pasamos la prioridad real del agente al puente.
+                    // Si tu trait `Agent` no tiene todavía `fn priority(&self) -> u8`,
+                    // agregalo al trait (y devolvé self.priority en Vehicle, etc.)
+                    let agent_priority = agent.priority();
+
+                    let signal = bridge.request_pass_vehicle(rt, agent_priority);
+
                     if signal == ThreadSignal::Continue {
                         state = AgentState::CrossingBridge;
                         crossing_progress = 0;
                     }
+
                     signal
                 }
-                
+
                 AgentState::CrossingBridge => {
                     crossing_progress += 1;
                     
@@ -167,7 +180,7 @@ fn main() {
 
                     if runtime.now() > fail_time {
                         plant.status = PlantStatus::Exploded;
-                        println!("\n☢️☢️☢️ ¡BOOM! La planta nuclear {} ha explotado por falta de {:?}!", plant.id, supply.kind);
+                        println!("\n ¡BOOM! La planta nuclear {} ha explotado por falta de {:?}!", plant.id, supply.kind);
                         println!("    Tiempo Límite Excedido: {}ms > {}ms (Última entrega en {}ms)\n", runtime.now(), fail_time, last_delivery_time);
                         break; 
                     }
