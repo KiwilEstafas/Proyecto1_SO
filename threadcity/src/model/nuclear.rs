@@ -1,6 +1,8 @@
 // planta nuclear y logistica de suministros
+use std::collections::HashMap;
+use crate::{model::coord, Coord};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupplyKind { Radioactive, Water }
 
 #[derive(Debug, Clone, Copy)]
@@ -22,30 +24,31 @@ pub enum PlantStatus { Ok, AtRisk, Exploded }
 pub struct NuclearPlant {
     pub id: u32,
     pub status: PlantStatus,
+    pub loc: Coord,
     pub requires: Vec<SupplySpec>,
     pub deadline_policy: DeadlinePolicy,
-    last_delivery_ms: u64,
+    last_delivery_ms: HashMap<SupplyKind,u64>,
 }
 
 impl NuclearPlant {
-    pub fn new(id: u32, requires: Vec<SupplySpec>, deadline_policy: DeadlinePolicy) -> Self {
+    pub fn new(id: u32, loc: Coord, requires: Vec<SupplySpec>, deadline_policy: DeadlinePolicy) -> Self {
         Self {
             id,
             status: PlantStatus::Ok,
+            loc, 
             requires,
             deadline_policy,
-            last_delivery_ms: 0,
+            last_delivery_ms: HashMap::new(),
         }
     }
 
     pub fn commit_delivery(&mut self, spec: SupplySpec, at_ms: u64) {
-        self.last_delivery_ms = at_ms;
-        // regla simple de demo: si llego tarde mas que la tolerancia se pone en riesgo
-        if at_ms > spec.deadline_ms + self.deadline_policy.max_lateness_ms {
-            self.status = PlantStatus::AtRisk;
-        } else {
-            self.status = PlantStatus::Ok;
-        }
+        self.last_delivery_ms.insert(spec.kind, at_ms);
+        self.status = PlantStatus::Ok
+    }
+
+    pub fn get_last_delivery_time(&self, kind:&SupplyKind) -> u64 {
+        *self.last_delivery_ms.get(kind).unwrap_or(&0)
     }
 }
 

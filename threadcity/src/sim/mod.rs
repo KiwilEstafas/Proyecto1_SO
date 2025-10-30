@@ -36,8 +36,8 @@ impl City {
     pub fn add_commerce(&mut self, id: u32, loc: (u32, u32)) {
         self.commerces.push(Commerce::new(id, Coord::new(loc.0, loc.1)));
     }
-    pub fn add_nuclear_plant(&mut self, id: u32, requires: Vec<SupplySpec>, policy: DeadlinePolicy) {
-        self.plants.push(NuclearPlant::new(id, requires, policy));
+    pub fn add_nuclear_plant(&mut self, id: u32, loc: (u32,u32), requires: Vec<SupplySpec>, policy: DeadlinePolicy) {
+        self.plants.push(NuclearPlant::new(id, Coord::new(loc.0, loc.1),requires, policy));
     }
 
     pub fn add_agent(&mut self, a: Box<dyn AgentDowncast + Send>) { self.agents.push(a); }

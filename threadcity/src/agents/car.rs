@@ -18,5 +18,7 @@ impl Agent for Car {
     fn id(&self) -> u32 { self.inner.id() }
     fn step(&mut self, dt_ms: u32) { self.inner.step(dt_ms); }
     fn pos(&self) -> Coord { self.inner.pos() }
+    fn set_pos(&mut self, new_pos: Coord) {
+        self.inner.set_pos(new_pos);}
 }
 

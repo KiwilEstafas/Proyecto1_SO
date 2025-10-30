@@ -6,6 +6,7 @@ pub trait Agent {
     fn id(&self) -> u32;
     fn step(&mut self, dt_ms: u32);
     fn pos(&self) -> Coord;
+    fn set_pos(&mut self, new_pos: Coord);
 }
 
 // helper para poder hacer downcast desde Box<dyn Agent>
@@ -64,5 +65,7 @@ impl Agent for Vehicle {
     fn id(&self) -> u32 { self.id }
     fn step(&mut self, _dt_ms: u32) { self.move_one(); }
     fn pos(&self) -> Coord { self.pos }
+    fn set_pos(&mut self, new_pos: Coord) {
+        self.pos = new_pos;}
 }
 
