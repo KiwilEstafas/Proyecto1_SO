@@ -32,7 +32,6 @@ impl City {
     pub fn now(&self) -> u64 { self.now_ms }
 
     pub fn add_river(&mut self) { self.river = Some(River::default()); }
-    pub fn add_bridge(&mut self, id: u32, lanes: u8) { self.bridges.push(Bridge::new(id, lanes)); }
     pub fn add_commerce(&mut self, id: u32, loc: (u32, u32)) {
         self.commerces.push(Commerce::new(id, Coord::new(loc.0, loc.1)));
     }

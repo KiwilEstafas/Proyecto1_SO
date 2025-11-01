@@ -2,7 +2,7 @@
 // Configuración estática de ThreadCity con todos sus elementos
 
 use crate::sim::City;
-use crate::model::{DeadlinePolicy, SupplySpec, SupplyKind};
+use crate::model::{DeadlinePolicy, SupplySpec, SupplyKind, Bridge, TrafficDirection};
 
 /// Coordenadas clave de la ciudad
 pub struct CityLayout {
@@ -46,17 +46,16 @@ pub fn create_threadcity() -> (City, CityLayout) {
     // ===================================================================
     // PUENTES
     // ===================================================================
+    // Puente 1: Semáforo, 1 carril, fila 1. Cambia cada 5 segundos (5000 ms).
+    city.bridges.push(Bridge::new_traffic_light(1, 1, 5000));
+    println!("🌉 Puente 1 (Semáforo): 1 carril en fila {}, ciclo 5000ms", layout.bridge1_row);
     
-    // Puente 1: Semáforo, 1 carril, fila 1
-    city.add_bridge(1, 1);
-    println!("🌉 Puente 1 (Semáforo): 1 carril en fila {}", layout.bridge1_row);
-    
-    // Puente 2: Ceda, 1 carril, fila 2
-    city.add_bridge(2, 1);
-    println!("🌉 Puente 2 (Ceda): 1 carril en fila {}", layout.bridge2_row);
+    // Puente 2: Ceda, 1 carril, fila 2. Damos prioridad al tráfico que va hacia el Este.
+    city.bridges.push(Bridge::new_yield(2, 1, TrafficDirection::WestToEast));
+    println!("🌉 Puente 2 (Ceda): 1 carril en fila {}, prioridad Oeste->Este", layout.bridge2_row);
     
     // Puente 3: Levadizo, 2 carriles, fila 3
-    city.add_bridge(3, 2);
+    city.bridges.push(Bridge::new_drawbridge(3, 2));
     println!("🌉 Puente 3 (Levadizo): 2 carriles en fila {}", layout.bridge3_row);
     
     // ===================================================================
@@ -102,12 +101,12 @@ pub fn create_threadcity() -> (City, CityLayout) {
         },
         SupplySpec {
             kind: SupplyKind::Water,
-            deadline_ms: 600,
+            deadline_ms: 3_000,
             period_ms: 8_000,
         },
     ];
     let plant1_policy = DeadlinePolicy {
-        max_lateness_ms: 100,
+        max_lateness_ms: 1_000,
     };
     city.add_nuclear_plant(1, (0,1),plant1_supplies, plant1_policy);
     println!("☢️  Planta Nuclear 1: Zona Oeste (crítica - scheduling RT)");
