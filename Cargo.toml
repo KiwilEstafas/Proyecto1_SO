@@ -1,3 +1,6 @@
 [workspace]
-members = ["mypthreads", "threadcity"]
 resolver = "2"
+members = [
+    "mypthreads",
+    "threadcity",
+    "threadcity-ui", ]
