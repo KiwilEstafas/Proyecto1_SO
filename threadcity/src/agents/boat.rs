@@ -5,7 +5,7 @@ use crate::model::Coord;
 
 #[derive(Debug, Clone)]
 pub struct Boat {
-    inner: Vehicle,
+    pub inner: Vehicle,
 }
 
 impl Boat {

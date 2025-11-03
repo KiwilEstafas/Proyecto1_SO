@@ -5,7 +5,7 @@ use crate::model::{Coord, SupplyKind};
 
 #[derive(Debug, Clone)]
 pub struct CargoTruck {
-    inner: Vehicle,
+    pub inner: Vehicle,
     pub cargo: SupplyKind,
 }
 
