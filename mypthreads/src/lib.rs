@@ -3,11 +3,19 @@
 
 pub mod runtime;
 pub mod thread;
+pub mod thread_v2;    
+pub mod channels;      
+pub mod api_context; 
 pub mod sched;
 pub mod signals;
 pub mod api_rust;
 pub mod mutex;
 pub mod context_wrapper;
+
+// exportar tipos v2
+pub use thread_v2::{MyThreadV2, ContextThreadEntry};
+pub use channels::{ThreadChannels, JoinHandle, SimpleMutex, SharedData};
+pub use api_context::*;
 
 pub use runtime::ThreadRuntime;
 pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
