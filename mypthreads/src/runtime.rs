@@ -3,6 +3,7 @@
 use std::collections::{HashMap, VecDeque};
 use crate::signals::ThreadSignal;
 use crate::thread::{MyThread, SchedulerType, ThreadEntry, ThreadId, ThreadState};
+use crate::context_wrapper::ThreadContext;
 
 pub struct ThreadRuntime {
     // reloj logico de la simulacion en milisegundos
@@ -11,6 +12,8 @@ pub struct ThreadRuntime {
     pub threads: HashMap<ThreadId, MyThread>,
     pub ready: VecDeque<ThreadId>,
     pub current_tid: Option<ThreadId>,
+    pub runtime_context: ThreadContext, // nuevo: contexto del scheduler
+    pub use_contexts: bool, // flag para activar/desactivar el modo de contextos
 }
 
 impl ThreadRuntime {
@@ -21,7 +24,14 @@ impl ThreadRuntime {
             threads: HashMap::new(),
             ready: VecDeque::new(),
             current_tid: None,
+            runtime_context: ThreadContext::new_runtime(),
+            use_contexts: false, // por defecto usa el modo cooperativo viejo
         }
+    }
+
+    // activar el modo de cambio de contexto real
+    pub fn enable_context_switching(&mut self) {
+        self.use_contexts = true;
     }
 
     // avanza el reloj logico en dt_ms
@@ -49,6 +59,9 @@ impl ThreadRuntime {
         let mut t = MyThread::new(tid, name.into(), sched, entry, tickets, deadline);
         t.state = ThreadState::Ready;
 
+        // por ahora no inicializamos el contexto aqui
+        // eso lo haremos en la fase 2b cuando creemos el thread_entry_wrapper
+
         self.threads.insert(tid, t);
         self.ready.push_back(tid);
         tid
@@ -67,6 +80,20 @@ impl ThreadRuntime {
         }
         self.current_tid = Some(tid);
 
+        // modo cooperativo viejo (por compatibilidad)
+        if !self.use_contexts {
+            self.run_once_cooperative(tid);
+            return;
+        }
+
+        // modo preemptivo nuevo con contextos
+        // nota: esto aun no funciona, lo implementaremos en fase 2b
+        // por ahora usamos el modo cooperativo
+        self.run_once_cooperative(tid);
+    }
+
+    // ejecuta un hilo en modo cooperativo (el sistema viejo)
+    fn run_once_cooperative(&mut self, tid: ThreadId) {
         // extraer temporalmente el entry para evitar doble prestamo mutable
         let mut entry = {
             let t = self.threads.get_mut(&tid).expect("thread debe existir");
@@ -159,4 +186,3 @@ impl ThreadRuntime {
         self.current_tid
     }
 }
-

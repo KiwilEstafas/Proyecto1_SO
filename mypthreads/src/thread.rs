@@ -1,6 +1,7 @@
 //! tipos basicos y estructura del hilo
 
 use crate::runtime::ThreadRuntime;
+use crate::context_wrapper::ThreadContext;
 
 // identificador de hilo
 pub type ThreadId = u32;
@@ -43,7 +44,8 @@ pub struct MyThread {
     pub detached: bool, // si es true no se puede hacer join y se limpia al terminar
     pub joiners: Vec<ThreadId>, // hilos que esperan a este hilo
     pub return_value: Option<RetVal>, // valor opaco para join estilo pthreads
-    pub(crate) entry: Option<ThreadEntry>,
+    pub(crate) entry: Option<ThreadEntry>, // mantener por compatibilidad temporalmente
+    pub context: Option<ThreadContext>, // nuevo: contexto para cambio de contexto real
 }
 
 impl MyThread {
@@ -66,8 +68,7 @@ impl MyThread {
             joiners: Vec::new(),
             return_value: None,
             entry: Some(entry),
+            context: None, // se inicializara en spawn cuando creemos el wrapper
         }
     }
 }
-
-
