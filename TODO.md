@@ -7,12 +7,14 @@ Esta guía te ayudará a reestructurar tu proyecto, pasando de un modelo de simu
 ### **Fase 1: El Mecanismo de Cambio de Contexto (La Base)**
 *Objetivo: Crear la maquinaria de bajo nivel para guardar y restaurar el estado de un hilo.*
 
--   [ ] **Definir la estructura `ThreadContext`:**
+-   [X ] **Definir la estructura `ThreadContext`:**
     -   Crea una struct que contenga los registros del CPU que se deben preservar entre cambios de contexto (mínimo: `rsp`, `rbp`, `rbx`, `r12`, `r13`, `r14`, `r15`, y un espacio para `rip`).
+    -    reality: Usamos el crate `context` con `ProtectedFixedSizeStack`, Encapsulamos `Context` y `Stack` en nuestra struct.
 
--   [ ] **Implementar la función `switch`:**
+-   [X ] **Implementar la función `switch`:**
     -   Escribe una función `unsafe`, probablemente usando `core::arch::asm!`, que tome dos punteros a `ThreadContext` (el viejo y el nuevo).
     -   Esta función debe guardar los registros del hilo actual en el contexto viejo y cargar los registros desde el contexto nuevo.
+    -   reality: Implementamos `resume()` que hace el cambio de contexto, Usa el crate `context` (no escribimos ensamblador manual).
 
 -   [ ] **Modificar la estructura `MyThread`:**
     -   Añade un campo para el contexto: `context: ThreadContext`.

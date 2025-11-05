@@ -7,6 +7,7 @@ pub mod sched;
 pub mod signals;
 pub mod api_rust;
 pub mod mutex;
+pub mod context_wrapper;
 
 pub use runtime::ThreadRuntime;
 pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
@@ -17,4 +18,5 @@ pub use api_rust::{
     my_mutex_lock, my_mutex_unlock, my_mutex_trylock
 };
 pub use mutex::MyMutex;
+pub use context_wrapper::ThreadContext;
 
