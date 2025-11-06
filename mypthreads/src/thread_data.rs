@@ -1,6 +1,6 @@
 //! estructuras para pasar datos entre contextos via Transfer.data
 
-use crate::thread_v2::{ThreadId, MyThreadV2};
+use crate::thread::{ThreadId, MyThread};
 use crate::channels::ThreadChannels;
 
 /// tipo de mensaje que se pasa via Transfer.data
@@ -8,7 +8,7 @@ use crate::channels::ThreadChannels;
 pub enum TransferMessage {
     /// mensaje inicial: contiene puntero al hilo, canales Y runtime context
     Init {
-        thread_ptr: *mut MyThreadV2,
+        thread_ptr: *mut MyThread,
         channels: ThreadChannels,
         runtime_context_ptr: usize,
     },

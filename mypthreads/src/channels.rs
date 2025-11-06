@@ -1,7 +1,7 @@
 //! canales de comunicacion entre hilos y runtime
 //! permite que los hilos se comuniquen sin &mut Runtime
 
-use crate::thread_v2::ThreadId;
+use crate::thread::ThreadId;
 use std::sync::{Arc, Mutex};
 use std::collections::{VecDeque, HashMap};
 

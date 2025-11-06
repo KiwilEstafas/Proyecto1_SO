@@ -1,34 +1,19 @@
-//! mypthreads mvp cooperativo
-//! expone api rust y api ffi con firmas tipo pthreads
+//! Biblioteca de hilos preemptivos con cambio de contexto
 
+// Módulos de la nueva arquitectura
 pub mod runtime;
-pub mod runtime_v2;
-pub mod thread;
-pub mod thread_v2;    
+pub mod thread;      // Asumiendo que renombras thread_data2.rs a thread_v2.rs
 pub mod thread_data;  
 pub mod channels;      
 pub mod api_context; 
-pub mod sched;
 pub mod signals;
-pub mod api_rust;
-pub mod mutex;
 pub mod context_wrapper;
 
-// exportar tipos v2
-pub use runtime_v2::ThreadRuntimeV2;
-pub use thread_v2::{MyThreadV2, ContextThreadEntry};
+// Tipos públicos de la biblioteca
+pub use runtime::ThreadRuntimeV2;
+pub use thread::{MyThread, ContextThreadEntry, ThreadId, ThreadState, SchedulerType};
 pub use channels::{ThreadChannels, JoinHandle, SimpleMutex, SharedData};
-pub use api_context::*;
-
-// los viejos
-pub use runtime::ThreadRuntime;
-pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
-pub use signals::ThreadSignal;
-pub use api_rust::{
-    my_thread_create, my_thread_end, my_thread_yield,
-    my_thread_join, my_thread_detach, my_thread_chsched, 
-    my_mutex_lock, my_mutex_unlock, my_mutex_trylock
-};
-pub use mutex::MyMutex;
+pub use api_context::*; // Exporta ctx_yield, ctx_exit, etc.
+pub use signals::ThreadSignal; // Aún se usa en ContextThreadEntry
 pub use context_wrapper::ThreadContext;
-
+pub use thread_data::{TransferMessage, ThreadResponse}; // Útil para debugging

@@ -2,7 +2,7 @@
 //! dos hilos hacen ping-pong usando yield
 
 use mypthreads::{ThreadRuntimeV2, ContextThreadEntry, ThreadSignal};
-use mypthreads::thread_v2::SchedulerType;
+use mypthreads::thread::SchedulerType;
 use std::sync::{Arc, Mutex};
 
 #[test]

@@ -1,188 +1,130 @@
-//! nucleo de ejecucion con reloj logico colas y diccionario de hilos
+//! runtime v2 que usa cambio de contexto real
 
 use std::collections::{HashMap, VecDeque};
-use crate::signals::ThreadSignal;
-use crate::thread::{MyThread, SchedulerType, ThreadEntry, ThreadId, ThreadState};
+use crate::thread::{MyThread, ContextThreadEntry, ThreadId, ThreadState, SchedulerType};
 use crate::context_wrapper::ThreadContext;
+use crate::channels::ThreadChannels;
+use crate::thread_data::{TransferMessage, ThreadResponse};
 
-pub struct ThreadRuntime {
-    // reloj logico de la simulacion en milisegundos
+pub struct ThreadRuntimeV2 {
     now_ms: u64,
     next_tid: ThreadId,
     pub threads: HashMap<ThreadId, MyThread>,
     pub ready: VecDeque<ThreadId>,
-    pub current_tid: Option<ThreadId>,
-    pub runtime_context: ThreadContext, // nuevo: contexto del scheduler
-    pub use_contexts: bool, // flag para activar/desactivar el modo de contextos
+    pub blocked: Vec<ThreadId>,
+    pub runtime_context: ThreadContext,
+    pub channels: ThreadChannels,
 }
 
-impl ThreadRuntime {
+impl ThreadRuntimeV2 {
     pub fn new() -> Self {
         Self {
             now_ms: 0,
             next_tid: 1,
             threads: HashMap::new(),
             ready: VecDeque::new(),
-            current_tid: None,
+            blocked: Vec::new(),
             runtime_context: ThreadContext::new_runtime(),
-            use_contexts: false, // por defecto usa el modo cooperativo viejo
+            channels: ThreadChannels::new(),
         }
     }
-
-    // activar el modo de cambio de contexto real
-    pub fn enable_context_switching(&mut self) {
-        self.use_contexts = true;
-    }
-
-    // avanza el reloj logico en dt_ms
-    pub fn advance_time(&mut self, dt_ms: u64) {
-        self.now_ms = self.now_ms.saturating_add(dt_ms);
-    }
-
-    // devuelve el tiempo logico actual
-    pub fn now(&self) -> u64 {
-        self.now_ms
-    }
-
+    
+    /// crea un nuevo hilo v2
     pub fn spawn(
         &mut self,
         name: impl Into<String>,
         sched: SchedulerType,
-        entry: ThreadEntry,
-        tickets: Option<u32>,
+        entry: ContextThreadEntry,
+        tickets: u32,
         deadline: Option<u64>,
     ) -> ThreadId {
         let tid = self.next_tid;
-        self.next_tid = self.next_tid.wrapping_add(1);
-
-        let tickets = tickets.unwrap_or(1);
-        let mut t = MyThread::new(tid, name.into(), sched, entry, tickets, deadline);
-        t.state = ThreadState::Ready;
-
-        // por ahora no inicializamos el contexto aqui
-        // eso lo haremos en la fase 2b cuando creemos el thread_entry_wrapper
-
-        self.threads.insert(tid, t);
+        self.next_tid += 1;
+        
+        let thread = MyThread::new(
+            tid,
+            name.into(),
+            sched,
+            tickets,
+            deadline,
+            entry,
+        );
+        
+        self.threads.insert(tid, thread);
         self.ready.push_back(tid);
+        
+        println!("[Runtime] creado hilo {} (total: {})", tid, self.threads.len());
+        
         tid
     }
-
-    // ejecuta un quantum logico
+    
+    /// ejecuta un quantum - version con contextos
     pub fn run_once(&mut self) {
-        // seleccionar hilo segun scheduler
-        let Some(tid) = self.select_next_thread() else {
+        let Some(tid) = self.ready.pop_front() else {
+            println!("[Runtime] no hay hilos ready");
             return;
         };
-
-        // marcar como running
-        if let Some(t) = self.threads.get_mut(&tid) {
-            t.state = ThreadState::Running;
-        }
-        self.current_tid = Some(tid);
-
-        // modo cooperativo viejo (por compatibilidad)
-        if !self.use_contexts {
-            self.run_once_cooperative(tid);
-            return;
-        }
-
-        // modo preemptivo nuevo con contextos
-        // nota: esto aun no funciona, lo implementaremos en fase 2b
-        // por ahora usamos el modo cooperativo
-        self.run_once_cooperative(tid);
-    }
-
-    // ejecuta un hilo en modo cooperativo (el sistema viejo)
-    fn run_once_cooperative(&mut self, tid: ThreadId) {
-        // extraer temporalmente el entry para evitar doble prestamo mutable
-        let mut entry = {
-            let t = self.threads.get_mut(&tid).expect("thread debe existir");
-            t.entry.take().expect("entry debe existir")
+        
+        println!("[Runtime] seleccionado hilo {} para ejecutar", tid);
+        
+        // obtener el hilo
+        let thread = self.threads.get_mut(&tid).expect("hilo debe existir");
+        thread.state = ThreadState::Running;
+        
+        // preparar mensaje inicial
+        let thread_ptr = thread as *mut MyThread;
+        let runtime_ctx_ptr = &mut self.runtime_context as *mut ThreadContext;
+        
+        let init_msg = TransferMessage::Init {
+            thread_ptr,
+            channels: self.channels.clone(),
+            runtime_context_ptr: runtime_ctx_ptr as usize,
         };
-
-        // ejecutar el paso del hilo sin tener prestado self threads
-        let signal = (entry)(self, tid);
-
-        // devolver el entry al hilo
-        {
-            let t = self.threads.get_mut(&tid).expect("thread debe existir");
-            t.entry = Some(entry);
-        }
-
-        // manejar la senal
-        match signal {
-            ThreadSignal::Continue | ThreadSignal::Yield => {
-                self.enqueue_ready(tid);
+        
+        // hacer resume al hilo
+        let response_data = unsafe {
+            thread.context.resume_with_data(init_msg.pack())
+        };
+        
+        // procesar respuesta
+        let response = unsafe { ThreadResponse::unpack(response_data) };
+        
+        println!("[Runtime] hilo {} retornó: {:?}", tid, response);
+        
+        match response {
+            ThreadResponse::Yield => {
+                println!("[Runtime] hilo {} hizo yield, reencolando", tid);
+                let thread = self.threads.get_mut(&tid).unwrap();
+                thread.state = ThreadState::Ready;
+                self.ready.push_back(tid);
             }
-            ThreadSignal::Block => {
-                if let Some(t) = self.threads.get_mut(&tid) {
-                    t.state = ThreadState::Blocked;
-                }
+            ThreadResponse::Block => {
+                println!("[Runtime] hilo {} se bloqueó", tid);
+                let thread = self.threads.get_mut(&tid).unwrap();
+                thread.state = ThreadState::Blocked;
+                self.blocked.push(tid);
             }
-            ThreadSignal::Exit => {
-                let (joiners_to_wake, detached) = {
-                    let t = self.threads.get_mut(&tid).expect("thread debe existir");
-                    t.state = ThreadState::Terminated;
-                    (std::mem::take(&mut t.joiners), t.detached)
-                };
-
-                for jtid in joiners_to_wake {
-                    self.wake(jtid);
-                }
-
-                if detached {
-                    self.threads.remove(&tid);
-                }
+            ThreadResponse::Exit => {
+                println!("[Runtime] hilo {} terminó", tid);
+                let thread = self.threads.get_mut(&tid).unwrap();
+                thread.state = ThreadState::Terminated;
+            }
+            ThreadResponse::Continue => {
+                self.ready.push_back(tid);
             }
         }
-
-        self.current_tid = None;
     }
-
-    // ejecuta multiples ciclos sin tocar el reloj
+    
+    /// ejecuta multiples ciclos
     pub fn run(&mut self, cycles: usize) {
-        for _ in 0..cycles {
+        for i in 0..cycles {
+            println!("\n[Runtime] === Ciclo {} ===", i + 1);
             self.run_once();
-            if self.ready.is_empty() {
+            
+            if self.ready.is_empty() && self.blocked.is_empty() {
+                println!("[Runtime] no hay más hilos para ejecutar");
                 break;
             }
         }
-    }
-
-    // selecciona el siguiente hilo a ejecutar segun su scheduler
-    pub(crate) fn select_next_thread(&mut self) -> Option<ThreadId> {
-        if self.ready.is_empty() {
-            return None;
-        }
-
-        let front_tid = *self.ready.front().unwrap();
-        let sched_type = self.threads.get(&front_tid)?.sched_type;
-
-        match sched_type {
-            SchedulerType::RoundRobin => self.schedule_roundrobin(),
-            SchedulerType::Lottery => self.schedule_lottery(),
-            SchedulerType::RealTime => self.schedule_realtime(),
-        }
-    }
-
-    // mover hilo a ready
-    pub(crate) fn enqueue_ready(&mut self, tid: ThreadId) {
-        if let Some(t) = self.threads.get_mut(&tid) {
-            t.state = ThreadState::Ready;
-        }
-        self.ready.push_back(tid);
-    }
-
-    // despertar hilo bloqueado
-    pub fn wake(&mut self, tid: ThreadId) {
-        if let Some(t) = self.threads.get_mut(&tid) {
-            t.state = ThreadState::Ready;
-        }
-        self.ready.push_back(tid);
-    }
-
-    // obtener el tid del hilo actual si existe
-    pub fn current(&self) -> Option<ThreadId> {
-        self.current_tid
     }
 }

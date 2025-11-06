@@ -1,7 +1,7 @@
 //! api de contexto para hilos preemptivos
 //! los hilos usan esta api en lugar de acceder al runtime
 
-use crate::thread_v2::ThreadId;
+use crate::thread::ThreadId;
 use crate::signals::ThreadSignal;
 use crate::channels::{ThreadChannels, JoinHandle, SimpleMutex};
 

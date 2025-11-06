@@ -1,12 +1,15 @@
-//! tipos basicos y estructura del hilo
+//! version 2 de thread con soporte para cambio de contexto real
 
-use crate::runtime::ThreadRuntime;
+use crate::JoinHandle;
 use crate::context_wrapper::ThreadContext;
+use crate::signals::ThreadSignal;
+use crate::thread_data::{TransferMessage, ThreadResponse, ThreadGlobalContext};
+use context::Transfer;
 
-// identificador de hilo
 pub type ThreadId = u32;
 
-// estados del hilo
+pub type ContextThreadEntry = Box<dyn FnMut(ThreadId) -> ThreadSignal + Send + 'static>;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
     New,
@@ -14,10 +17,8 @@ pub enum ThreadState {
     Running,
     Blocked,
     Terminated,
-    Detached,
 }
 
-// tipos de planificador
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedulerType {
     RoundRobin,
@@ -25,38 +26,33 @@ pub enum SchedulerType {
     RealTime,
 }
 
-// entry es el closure que ejecuta el hilo y devuelve una senal
-pub type ThreadEntry =
-    Box<dyn FnMut(&mut ThreadRuntime, ThreadId) -> crate::signals::ThreadSignal + 'static>;
-
-pub struct RetVal(pub *mut core::ffi::c_void);
-unsafe impl Send for RetVal {}
-unsafe impl Sync for RetVal {}
-
-// estructura del hilo
-pub struct MyThread {
+pub struct MyThread
+ {
     pub id: ThreadId,
     pub name: String,
     pub state: ThreadState,
     pub sched_type: SchedulerType,
-    pub tickets: u32, // para lottery
-    pub deadline: Option<u64>, // deadline absoluto en milisegundos logicos
-    pub detached: bool, // si es true no se puede hacer join y se limpia al terminar
-    pub joiners: Vec<ThreadId>, // hilos que esperan a este hilo
-    pub return_value: Option<RetVal>, // valor opaco para join estilo pthreads
-    pub(crate) entry: Option<ThreadEntry>, // mantener por compatibilidad temporalmente
-    pub context: Option<ThreadContext>, // nuevo: contexto para cambio de contexto real
+    pub tickets: u32,
+    pub deadline: Option<u64>,
+    pub detached: bool,
+    pub joiners: Vec<ThreadId>,
+    pub join_handle: JoinHandle, //Para saber quienes estan esperando por el hilo 
+    pub context: ThreadContext,
+    entry: Option<ContextThreadEntry>,
 }
 
-impl MyThread {
+impl MyThread
+ {
     pub fn new(
         id: ThreadId,
         name: String,
         sched_type: SchedulerType,
-        entry: ThreadEntry,
         tickets: u32,
         deadline: Option<u64>,
+        entry: ContextThreadEntry,
     ) -> Self {
+        let context = ThreadContext::new(thread_entry_wrapper);
+        
         Self {
             id,
             name,
@@ -66,9 +62,99 @@ impl MyThread {
             deadline,
             detached: false,
             joiners: Vec::new(),
-            return_value: None,
+            join_handle: JoinHandle::new(),
+            context,
             entry: Some(entry),
-            context: None, // se inicializara en spawn cuando creemos el wrapper
+        }
+    }
+    
+    /// ejecutar un paso del hilo
+    pub(crate) fn execute_step(&mut self) -> ThreadSignal {
+        if let Some(ref mut entry) = self.entry {
+            entry(self.id)
+        } else {
+            ThreadSignal::Exit
+        }
+    }
+}
+
+/// EL WRAPPER REAL
+/// ejecutamos el hilo y retornamos la respuesta via Transfer
+extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
+    // FASE 1: Inicialización
+    let init_msg = unsafe { TransferMessage::unpack(transfer.data) };
+    
+    let (thread_ptr, channels, tid) = match init_msg {
+        TransferMessage::Init { 
+            thread_ptr, 
+            channels,
+            runtime_context_ptr: _,
+        } => {
+            let tid = unsafe { (*thread_ptr).id };
+            (thread_ptr, channels, tid)
+        }
+        _ => {
+            eprintln!("ERROR: thread_entry_wrapper esperaba mensaje Init");
+            std::process::abort();
+        }
+    };
+    
+    // Inicializar contexto global
+    ThreadGlobalContext::init(tid, channels.clone());
+    
+    // Inicializar API de contexto
+    crate::api_context::init_thread_context(tid, channels);
+    
+    println!("[Hilo {}] inicializado correctamente", tid);
+    
+    // FASE 2: Loop de Ejecución
+    loop {
+        // Ejecutar un paso del hilo
+        let signal = unsafe {
+            let thread = &mut *thread_ptr;
+            thread.execute_step()
+        };
+        
+        println!("[Hilo {}] execute_step retornó: {:?}", tid, signal);
+        
+        // Convertir señal a respuesta
+        let response = match signal {
+            ThreadSignal::Yield => {
+                println!("[Hilo {}] preparando yield al runtime", tid);
+                ThreadResponse::Yield
+            }
+            ThreadSignal::Continue => {
+                // Continuar ejecutando sin retornar
+                continue;
+            }
+            ThreadSignal::Block => {
+                println!("[Hilo {}] preparando block", tid);
+                ThreadResponse::Block
+            }
+            ThreadSignal::Exit => {
+                println!("[Hilo {}] preparando exit", tid);
+                ThreadResponse::Exit
+            }
+        };
+        
+        // Guardar si es Exit antes de mover response
+        let is_exit = matches!(response, ThreadResponse::Exit);
+        
+        // Retornar al runtime empaquetando la respuesta
+        let response_data = response.pack();
+        
+        // CLAVE: usamos el contexto que nos pasó el Transfer para retornar
+        transfer = unsafe {
+            transfer.context.resume(response_data)
+        };
+        
+        // Cuando volvamos aquí, el runtime nos despertó
+        println!("[Hilo {}] despertado por el runtime", tid);
+        
+        // Si la respuesta fue Exit, no deberíamos estar aquí
+        if is_exit {
+            eprintln!("[Hilo {}] ERROR: runtime despertó un hilo terminado", tid);
+            std::process::abort();
         }
     }
 }
