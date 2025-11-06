@@ -2,8 +2,10 @@
 //! expone api rust y api ffi con firmas tipo pthreads
 
 pub mod runtime;
+pub mod runtime_v2;
 pub mod thread;
 pub mod thread_v2;    
+pub mod thread_data;  
 pub mod channels;      
 pub mod api_context; 
 pub mod sched;
@@ -13,10 +15,12 @@ pub mod mutex;
 pub mod context_wrapper;
 
 // exportar tipos v2
+pub use runtime_v2::ThreadRuntimeV2;
 pub use thread_v2::{MyThreadV2, ContextThreadEntry};
 pub use channels::{ThreadChannels, JoinHandle, SimpleMutex, SharedData};
 pub use api_context::*;
 
+// los viejos
 pub use runtime::ThreadRuntime;
 pub use thread::{MyThread, ThreadId, ThreadState, SchedulerType, ThreadEntry};
 pub use signals::ThreadSignal;

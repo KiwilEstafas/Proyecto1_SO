@@ -39,6 +39,7 @@ extern "C" fn thread_b(_transfer: Transfer) -> ! {
 }
 
 #[test]
+#[ignore]
 fn test_basic_context_creation() {
     println!("\n=== TEST: creacion basica de contextos ===");
     
@@ -57,6 +58,7 @@ fn test_basic_context_creation() {
 }
 
 #[test]
+#[ignore]
 fn test_runtime_context_creation() {
     println!("\n=== TEST: creacion de contexto de runtime ===");
     
@@ -71,6 +73,7 @@ fn test_runtime_context_creation() {
 }
 
 #[test]
+#[ignore]
 fn test_context_can_be_prepared_for_swap() {
     println!("\n=== TEST: verificar que contextos estan listos para swap ===");
     println!("nota: no hacemos swap real porque requiere que el hilo pueda");

@@ -1,12 +1,12 @@
 //! version 2 de thread con soporte para cambio de contexto real
-//! usa ContextThreadEntry que no necesita &mut Runtime porque me dio problemitas jj
 
 use crate::context_wrapper::ThreadContext;
 use crate::signals::ThreadSignal;
+use crate::thread_data::{TransferMessage, ThreadResponse, ThreadGlobalContext};
+use context::Transfer;
 
 pub type ThreadId = u32;
 
-// nuevo tipo de entry sin acceso al runtime
 pub type ContextThreadEntry = Box<dyn FnMut(ThreadId) -> ThreadSignal + Send + 'static>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -25,7 +25,6 @@ pub enum SchedulerType {
     RealTime,
 }
 
-// version 2 del hilo con context obligatorio
 pub struct MyThreadV2 {
     pub id: ThreadId,
     pub name: String,
@@ -36,9 +35,6 @@ pub struct MyThreadV2 {
     pub detached: bool,
     pub joiners: Vec<ThreadId>,
     pub context: ThreadContext,
-    
-    // guardamos el entry aqui para poder ejecutarlo
-    // pero NO lo exponemos al runtime
     entry: Option<ContextThreadEntry>,
 }
 
@@ -51,7 +47,6 @@ impl MyThreadV2 {
         deadline: Option<u64>,
         entry: ContextThreadEntry,
     ) -> Self {
-        // crear el context con el wrapper
         let context = ThreadContext::new(thread_entry_wrapper);
         
         Self {
@@ -68,8 +63,7 @@ impl MyThreadV2 {
         }
     }
     
-    // ejecutar un paso del hilo
-    // esto lo llama el wrapper, no el runtime
+    /// ejecutar un paso del hilo
     pub(crate) fn execute_step(&mut self) -> ThreadSignal {
         if let Some(ref mut entry) = self.entry {
             entry(self.id)
@@ -79,10 +73,83 @@ impl MyThreadV2 {
     }
 }
 
-// PLACEHOLDER: esto lo implementaremos en PASO 2
-extern "C" fn thread_entry_wrapper(_transfer: context::Transfer) -> ! {
-    // TODO: implementar en PASO 2
+/// EL WRAPPER REAL
+/// ejecutamos el hilo y retornamos la respuesta via Transfer
+extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
+    // FASE 1: Inicialización
+    let init_msg = unsafe { TransferMessage::unpack(transfer.data) };
+    
+    let (thread_ptr, channels, tid) = match init_msg {
+        TransferMessage::Init { 
+            thread_ptr, 
+            channels,
+            runtime_context_ptr: _,
+        } => {
+            let tid = unsafe { (*thread_ptr).id };
+            (thread_ptr, channels, tid)
+        }
+        _ => {
+            eprintln!("ERROR: thread_entry_wrapper esperaba mensaje Init");
+            std::process::abort();
+        }
+    };
+    
+    // Inicializar contexto global
+    ThreadGlobalContext::init(tid, channels.clone());
+    
+    // Inicializar API de contexto
+    crate::api_context::init_thread_context(tid, channels);
+    
+    println!("[Hilo {}] inicializado correctamente", tid);
+    
+    // FASE 2: Loop de Ejecución
     loop {
-        std::hint::spin_loop();
+        // Ejecutar un paso del hilo
+        let signal = unsafe {
+            let thread = &mut *thread_ptr;
+            thread.execute_step()
+        };
+        
+        println!("[Hilo {}] execute_step retornó: {:?}", tid, signal);
+        
+        // Convertir señal a respuesta
+        let response = match signal {
+            ThreadSignal::Yield => {
+                println!("[Hilo {}] preparando yield al runtime", tid);
+                ThreadResponse::Yield
+            }
+            ThreadSignal::Continue => {
+                // Continuar ejecutando sin retornar
+                continue;
+            }
+            ThreadSignal::Block => {
+                println!("[Hilo {}] preparando block", tid);
+                ThreadResponse::Block
+            }
+            ThreadSignal::Exit => {
+                println!("[Hilo {}] preparando exit", tid);
+                ThreadResponse::Exit
+            }
+        };
+        
+        // Guardar si es Exit antes de mover response
+        let is_exit = matches!(response, ThreadResponse::Exit);
+        
+        // Retornar al runtime empaquetando la respuesta
+        let response_data = response.pack();
+        
+        // CLAVE: usamos el contexto que nos pasó el Transfer para retornar
+        transfer = unsafe {
+            transfer.context.resume(response_data)
+        };
+        
+        // Cuando volvamos aquí, el runtime nos despertó
+        println!("[Hilo {}] despertado por el runtime", tid);
+        
+        // Si la respuesta fue Exit, no deberíamos estar aquí
+        if is_exit {
+            eprintln!("[Hilo {}] ERROR: runtime despertó un hilo terminado", tid);
+            std::process::abort();
+        }
     }
 }

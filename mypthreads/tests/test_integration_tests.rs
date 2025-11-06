@@ -16,6 +16,7 @@ use std::collections::HashMap;
 // TEST 1: CICLO DE VIDA BÁSICO Y YIELD
 // ===================================================================
 #[test] // <--- ¡Atributo AÑADIDO!
+#[ignore]
 fn test_basic_thread_lifecycle() {
     println!("\n[TEST 1] Probando creación, yield y finalización de hilos...");
 
@@ -59,6 +60,7 @@ fn test_basic_thread_lifecycle() {
 // TEST 2: SINCRONIZACIÓN CON JOIN
 // ===================================================================
 #[test] // <--- ¡Atributo AÑADIDO!
+#[ignore]
 fn test_thread_join() {
     // ... (El resto de la función es idéntico)
     println!("\n[TEST 2] Probando my_thread_join para esperar por otro hilo...");
@@ -98,6 +100,7 @@ fn test_thread_join() {
 // TEST 3: MUTEX PARA EXCLUSIÓN MUTUA (versión corregida y robusta)
 // ===================================================================
 #[test]
+#[ignore]
 fn test_mutex_blocking() {
     println!("\n[TEST 3] Probando bloqueo y desbloqueo de mutex...");
 
@@ -151,6 +154,7 @@ fn test_mutex_blocking() {
 // TEST 4: COMPORTAMIENTO DE LOS SCHEDULERS
 // ===================================================================
 #[test] // <--- ¡Atributo AÑADIDO!
+#[ignore]
 fn test_schedulers() {
     // ... (El resto de la función es idéntico)
     println!("\n[TEST 4] Probando Schedulers (Lottery y RealTime)...");

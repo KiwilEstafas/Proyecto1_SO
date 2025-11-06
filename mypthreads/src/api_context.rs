@@ -5,7 +5,7 @@ use crate::thread_v2::ThreadId;
 use crate::signals::ThreadSignal;
 use crate::channels::{ThreadChannels, JoinHandle, SimpleMutex};
 
-/// thread-local storage para que cada hilo sepa su tid y tenga acceso a los canales
+// Thread-local storage para que cada hilo sepa su tid y tenga acceso a los canales
 thread_local! {
     static CURRENT_TID: std::cell::RefCell<Option<ThreadId>> = std::cell::RefCell::new(None);
     static CHANNELS: std::cell::RefCell<Option<ThreadChannels>> = std::cell::RefCell::new(None);
