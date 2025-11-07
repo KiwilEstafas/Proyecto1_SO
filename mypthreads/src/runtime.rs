@@ -220,4 +220,8 @@ impl ThreadRuntimeV2 {
             }
         }
     }
+    
+    pub fn current_time(&self) -> u64 {
+        self.now_ms
+    }
 }
