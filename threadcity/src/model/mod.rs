@@ -12,7 +12,7 @@
 // pub use coord::Coord;
 // pub use river::River;
 // pub use traffic::{TrafficLightState, YieldSign};
-// pub use bridge::{Bridge, TrafficDirection};
+pub use bridge::{Bridge, TrafficDirection, BridgeType};
 // pub use commerce::Commerce;
 // pub use nuclear::{SupplyKind, SupplySpec, DeadlinePolicy, PlantStatus, NuclearPlant};
  

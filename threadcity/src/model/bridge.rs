@@ -1,284 +1,267 @@
-// // threadcity/src/model/bridge.rs
+// Versión v2 compatible con mypthreads preemptivo
 
-// use mypthreads::mutex::MyMutex;
-// use mypthreads::{my_mutex_lock, my_mutex_unlock};
-// use mypthreads::signals::ThreadSignal;
-// use mypthreads::runtime::ThreadRuntime;
-// use mypthreads::thread::ThreadId;
+use mypthreads::channels::SimpleMutex;
+use mypthreads::signals::ThreadSignal;
+use mypthreads::mypthreads_api::{my_mutex_lock, my_mutex_unlock};
+use std::sync::{Arc, Mutex};
 
-// /// Define la dirección del tráfico para controlar los puentes.
-// /// Asumimos que el río es vertical, por lo que el tráfico es Este/Oeste.
-// #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-// pub enum TrafficDirection {
-//     WestToEast,
-//     EastToWest,
-// }
+/// Dirección del tráfico para controlar los puentes
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TrafficDirection {
+    WestToEast,
+    EastToWest,
+}
 
-// /// Contiene la lógica y el estado específico para cada tipo de puente.
-// #[derive(Debug)]
-// pub enum BridgeLogic {
-//     /// Puente 1: Semáforo que alterna entre direcciones.
-//     TrafficLight {
-//         lanes: u8,
-//         current_direction: TrafficDirection,
-//         green_duration_ms: u64,
-//         time_in_current_state_ms: u64,
-//     },
-//     /// Puente 2: Ceda el paso, una dirección tiene prioridad.
-//     Yield {
-//         lanes: u8,
-//         priority_direction: TrafficDirection,
-//     },
-//     /// Puente 3: Levadizo, permite el paso de barcos.
-//     Drawbridge {
-//         lanes: u8,
-//     },
-// }
+/// Estado compartido del puente (protegido por Mutex)
+#[derive(Debug, Default)]
+struct BridgeState {
+    vehicles_on_bridge: u32,
+    direction_on_bridge: Option<TrafficDirection>,
+    is_boat_passing: bool,
+    max_capacity: u32,
+}
 
-// /// Estado interno y compartido del puente, protegido por un mutex.
-// #[derive(Debug, Default)]
-// struct BridgeState {
-//     vehicles_on_bridge: u32,
-//     // Qué dirección de tráfico está usando el puente actualmente
-//     direction_on_bridge: Option<TrafficDirection>,
-//     is_boat_passing: bool,
-//     // La cola de espera ahora incluye la dirección deseada por cada hilo
-//     waiting_threads: Vec<(u8, ThreadId, TrafficDirection)>,
-// }
+/// Tipos de puente
+#[derive(Debug, Clone)]
+pub enum BridgeType {
+    /// Puente 1: Semáforo (1 carril, alterna direcciones cada N ms)
+    TrafficLight {
+        lanes: u32,
+        green_duration_ms: u64,
+        current_direction: TrafficDirection,
+        time_in_state: u64,
+    },
+    /// Puente 2: Ceda el paso (1 carril, prioridad a una dirección)
+    Yield {
+        lanes: u32,
+        priority_direction: TrafficDirection,
+    },
+    /// Puente 3: Levadizo (2 carriles, permite barcos)
+    Drawbridge {
+        lanes: u32,
+    },
+}
 
+pub struct Bridge {
+    pub id: u32,
+    pub row: u32,
+    pub bridge_type: BridgeType,
+    mutex: Arc<SimpleMutex>,
+    state: Arc<Mutex<BridgeState>>,
+}
 
-// pub struct Bridge {
-//     pub id: u32,
-//     logic: BridgeLogic, // El comportamiento específico del puente
-//     mutex: MyMutex,
-//     state: BridgeState,
-// }
+impl Bridge {
+    pub fn new_traffic_light(id: u32, row: u32, green_duration_ms: u64) -> Self {
+        let lanes = 1;
+        Self {
+            id,
+            row,
+            bridge_type: BridgeType::TrafficLight {
+                lanes,
+                green_duration_ms,
+                current_direction: TrafficDirection::WestToEast,
+                time_in_state: 0,
+            },
+            mutex: Arc::new(SimpleMutex::new()),
+            state: Arc::new(Mutex::new(BridgeState {
+                max_capacity: lanes,
+                ..Default::default()
+            })),
+        }
+    }
 
-// impl Bridge {
-//     // --- Constructores para cada tipo de puente ---
+    pub fn new_yield(id: u32, row: u32, priority_direction: TrafficDirection) -> Self {
+        let lanes = 1;
+        Self {
+            id,
+            row,
+            bridge_type: BridgeType::Yield {
+                lanes,
+                priority_direction,
+            },
+            mutex: Arc::new(SimpleMutex::new()),
+            state: Arc::new(Mutex::new(BridgeState {
+                max_capacity: lanes,
+                ..Default::default()
+            })),
+        }
+    }
 
-//     pub fn new_traffic_light(id: u32, lanes: u8, green_duration_ms: u64) -> Self {
-//         Self {
-//             id,
-//             logic: BridgeLogic::TrafficLight {
-//                 lanes,
-//                 current_direction: TrafficDirection::WestToEast, // Empieza en una dirección
-//                 green_duration_ms,
-//                 time_in_current_state_ms: 0,
-//             },
-//             mutex: MyMutex::my_mutex_init(),
-//             state: BridgeState::default(),
-//         }
-//     }
+    pub fn new_drawbridge(id: u32, row: u32) -> Self {
+        let lanes = 2;
+        Self {
+            id,
+            row,
+            bridge_type: BridgeType::Drawbridge { lanes },
+            mutex: Arc::new(SimpleMutex::new()),
+            state: Arc::new(Mutex::new(BridgeState {
+                max_capacity: lanes,
+                ..Default::default()
+            })),
+        }
+    }
 
-//     pub fn new_yield(id: u32, lanes: u8, priority_direction: TrafficDirection) -> Self {
-//         Self {
-//             id,
-//             logic: BridgeLogic::Yield { lanes, priority_direction },
-//             mutex: MyMutex::my_mutex_init(),
-//             state: BridgeState::default(),
-//         }
-//     }
+    /// Actualiza el estado interno del puente (para semáforos)
+    pub fn step(&mut self, dt_ms: u64) {
+        if let BridgeType::TrafficLight {
+            ref mut time_in_state,
+            ref mut current_direction,
+            green_duration_ms,
+            ..
+        } = self.bridge_type
+        {
+            *time_in_state += dt_ms;
+            if *time_in_state >= green_duration_ms {
+                *time_in_state = 0;
+                *current_direction = match *current_direction {
+                    TrafficDirection::WestToEast => TrafficDirection::EastToWest,
+                    TrafficDirection::EastToWest => TrafficDirection::WestToEast,
+                };
+                println!(
+                    "[Puente {}] 🚦 Semáforo cambió a {:?}",
+                    self.id, *current_direction
+                );
+            }
+        }
+    }
 
-//     pub fn new_drawbridge(id: u32, lanes: u8) -> Self {
-//         Self {
-//             id,
-//             logic: BridgeLogic::Drawbridge { lanes },
-//             mutex: MyMutex::my_mutex_init(),
-//             state: BridgeState::default(),
-//         }
-//     }
+    /// Un vehículo solicita cruzar el puente
+    /// Retorna ThreadSignal::Continue si puede pasar, Block si debe esperar
+    pub fn request_pass_vehicle(
+        &self,
+        direction: TrafficDirection,
+        is_ambulance: bool,
+    ) -> ThreadSignal {
+        // Las ambulancias SIEMPRE pasan sin bloquear
+        if is_ambulance {
+            println!("[Puente {}] 🚑 Ambulancia pasa sin esperar", self.id);
+            return ThreadSignal::Continue;
+        }
 
-//     /// Método llamado en cada tick de la simulación para actualizar estados internos (ej: semáforos)
-//     pub fn step(&mut self, dt_ms: u64, rt: &mut ThreadRuntime) {
-//         my_mutex_lock(rt, &mut self.mutex);
+        // Intentar adquirir el mutex del puente
+        let lock_signal = my_mutex_lock(&self.mutex);
+        if lock_signal != ThreadSignal::Continue {
+            return lock_signal; // Bloqueado esperando el mutex
+        }
 
-//         if let BridgeLogic::TrafficLight {
-//             ref mut current_direction,
-//             green_duration_ms,
-//             ref mut time_in_current_state_ms,
-//             ..
-//         } = self.logic
-//         {
-//             *time_in_current_state_ms += dt_ms;
-//             if *time_in_current_state_ms >= green_duration_ms {
-//                 // Cambiar de dirección el semáforo
-//                 *time_in_current_state_ms = 0;
-//                 *current_direction = match *current_direction {
-//                     TrafficDirection::WestToEast => TrafficDirection::EastToWest,
-//                     TrafficDirection::EastToWest => TrafficDirection::WestToEast,
-//                 };
-//                 println!("[Puente Semáforo {}] LUZ VERDE para la dirección {:?}", self.id, *current_direction);
+        // Ya tenemos el lock, verificar si puede pasar
+        let mut state = self.state.lock().unwrap();
 
-//                 // Despertar a los hilos que esperaban por esta dirección
-//                 let (threads_to_wake, remaining_threads) = self.state.waiting_threads.drain(..).partition(|(_, _, dir)| *dir == *current_direction);
-//                 self.state.waiting_threads = remaining_threads;
+        let can_pass = match &self.bridge_type {
+            BridgeType::TrafficLight {
+                current_direction, ..
+            } => {
+                // Solo puede pasar si el semáforo está en verde para su dirección
+                let light_is_green = *current_direction == direction;
+                let has_space = state.vehicles_on_bridge < state.max_capacity;
+                let same_dir = state.direction_on_bridge == Some(direction)
+                    || state.direction_on_bridge.is_none();
 
-//                 my_mutex_unlock(rt, &mut self.mutex); // Liberar mutex ANTES de despertar
-//                 for (_, tid, _) in threads_to_wake {
-//                     rt.wake(tid);
-//                 }
-//                 return; // Salimos para no desbloquear el mutex dos veces
-//             }
-//         }
-//         my_mutex_unlock(rt, &mut self.mutex);
-//     }
+                !state.is_boat_passing && has_space && light_is_green && same_dir
+            }
 
+            BridgeType::Yield {
+                priority_direction, ..
+            } => {
+                // La dirección prioritaria siempre puede pasar si hay espacio
+                // La otra dirección solo puede pasar si el puente está vacío
+                let has_space = state.vehicles_on_bridge < state.max_capacity;
+                let same_dir = state.direction_on_bridge == Some(direction)
+                    || state.direction_on_bridge.is_none();
 
-//     /// Un vehículo solicita pasar por el puente
-//     pub fn request_pass_vehicle(
-//         &mut self,
-//         rt: &mut ThreadRuntime,
-//         priority: u8,
-//         direction: TrafficDirection,
-//     ) -> ThreadSignal {
-//         if my_mutex_lock(rt, &mut self.mutex) == ThreadSignal::Block {
-//             return ThreadSignal::Block;
-//         }
+                if direction == *priority_direction {
+                    !state.is_boat_passing && has_space && same_dir
+                } else {
+                    !state.is_boat_passing && state.vehicles_on_bridge == 0
+                }
+            }
 
-//         // --- Lógica de decisión para permitir o bloquear ---
-//         let can_pass = match &self.logic {
-//             BridgeLogic::TrafficLight { lanes, current_direction, .. } => {
-//                 let light_is_green = *current_direction == direction;
-//                 let bridge_is_free = self.state.vehicles_on_bridge == 0;
-//                 let bridge_is_same_dir = self.state.direction_on_bridge == Some(direction);
+            BridgeType::Drawbridge { .. } => {
+                // Puede pasar si hay espacio y no está pasando un barco
+                let has_space = state.vehicles_on_bridge < state.max_capacity;
+                let same_dir = state.direction_on_bridge == Some(direction)
+                    || state.direction_on_bridge.is_none();
 
-//                 // Condiciones para pasar:
-//                 // 1. La luz está verde para mi dirección Y hay espacio.
-//                 // 2. O, el puente está ocupado por vehículos en mi misma dirección (para terminar de vaciarlo).
-//                 !self.state.is_boat_passing &&
-//                 self.state.vehicles_on_bridge < *lanes as u32 &&
-//                 (light_is_green || (bridge_is_same_dir && !bridge_is_free))
-//             }
+                !state.is_boat_passing && has_space && same_dir
+            }
+        };
 
-//             BridgeLogic::Yield { lanes, priority_direction } => {
-//                 let bridge_is_free = self.state.vehicles_on_bridge == 0;
-//                 let bridge_is_same_dir = self.state.direction_on_bridge == Some(direction);
-//                 let other_direction_is_waiting = self.state.waiting_threads.iter().any(|(_, _, dir)| *dir != direction);
+        if can_pass {
+            state.vehicles_on_bridge += 1;
+            state.direction_on_bridge = Some(direction);
+            println!(
+                "[Puente {}] 🚗 Vehículo entrando ({:?}). Ocupación: {}/{}",
+                self.id, direction, state.vehicles_on_bridge, state.max_capacity
+            );
+            drop(state);
+            my_mutex_unlock(&self.mutex);
+            return ThreadSignal::Continue;
+        }
 
-//                 // Condiciones para pasar:
-//                 // 1. El puente está libre Y nadie de la dirección prioritaria está esperando.
-//                 // 2. O, mi dirección es la prioritaria Y el puente está libre.
-//                 // 3. O, ya hay gente pasando en mi dirección y hay espacio.
-//                  !self.state.is_boat_passing &&
-//                  self.state.vehicles_on_bridge < *lanes as u32 &&
-//                  (
-//                     (bridge_is_free && (direction == *priority_direction || !other_direction_is_waiting)) ||
-//                     bridge_is_same_dir
-//                  )
-//             }
+        // No puede pasar, liberar el mutex y bloquearse
+        drop(state);
+        my_mutex_unlock(&self.mutex);
+        println!(
+            "[Puente {}] 🚫 Vehículo bloqueado ({:?})",
+            self.id, direction
+        );
+        ThreadSignal::Block
+    }
 
-//             BridgeLogic::Drawbridge { lanes } => {
-//                 let bridge_is_free = self.state.vehicles_on_bridge == 0;
-//                 let bridge_is_same_dir = self.state.direction_on_bridge == Some(direction);
+    /// Un vehículo notifica que terminó de cruzar
+    pub fn release_pass_vehicle(&self) {
+        my_mutex_lock(&self.mutex);
+        let mut state = self.state.lock().unwrap();
 
-//                 // Condición: No está pasando un barco Y (el puente está libre O va en mi dirección) Y hay espacio.
-//                 !self.state.is_boat_passing &&
-//                 self.state.vehicles_on_bridge < *lanes as u32 &&
-//                 (bridge_is_free || bridge_is_same_dir)
-//             }
-//         };
+        if state.vehicles_on_bridge > 0 {
+            state.vehicles_on_bridge -= 1;
+        }
 
-//         if can_pass {
-//             self.state.vehicles_on_bridge += 1;
-//             self.state.direction_on_bridge = Some(direction);
-//             println!("[Puente {}] Vehículo (prio {}, dir {:?}) ENTRANDO. Ocupación: {}", self.id, priority, direction, self.state.vehicles_on_bridge);
-//             my_mutex_unlock(rt, &mut self.mutex);
-//             return ThreadSignal::Continue;
-//         }
+        if state.vehicles_on_bridge == 0 {
+            state.direction_on_bridge = None;
+        }
 
-//         // --- Si no puede pasar, se añade a la cola de espera ---
-//         println!("[Puente {}] Vehículo (prio {}, dir {:?}) BLOQUEADO. A la cola de espera.", self.id, priority, direction);
-//         if let Some(tid) = rt.current() {
-//             if !self.state.waiting_threads.iter().any(|&(_, waiting_tid, _)| waiting_tid == tid) {
-//                 self.state.waiting_threads.push((priority, tid, direction));
-//                 // Mantenemos la cola ordenada por prioridad (mayor a menor)
-//                 self.state.waiting_threads.sort_by_key(|(p, _, _)| std::cmp::Reverse(*p));
-//             }
-//         }
-//         my_mutex_unlock(rt, &mut self.mutex);
-//         ThreadSignal::Block
-//     }
+        println!(
+            "[Puente {}] ✅ Vehículo salió. Ocupación: {}/{}",
+            self.id, state.vehicles_on_bridge, state.max_capacity
+        );
 
-//     /// Un vehículo notifica que ha terminado de cruzar
-//     pub fn release_pass_vehicle(&mut self, rt: &mut ThreadRuntime) {
-//         my_mutex_lock(rt, &mut self.mutex);
+        drop(state);
+        my_mutex_unlock(&self.mutex);
+    }
 
-//         if self.state.vehicles_on_bridge > 0 {
-//             self.state.vehicles_on_bridge -= 1;
-//         }
-//         println!("[Puente {}] Vehículo SALIENDO. Ocupación: {}", self.id, self.state.vehicles_on_bridge);
-        
-//         let mut thread_to_wake: Option<ThreadId> = None;
+    /// Un barco solicita pasar (solo para Drawbridge)
+    pub fn request_pass_boat(&self) -> ThreadSignal {
+        let lock_signal = my_mutex_lock(&self.mutex);
+        if lock_signal != ThreadSignal::Continue {
+            return lock_signal;
+        }
 
-//         // Si el puente queda vacío, reseteamos la dirección
-//         if self.state.vehicles_on_bridge == 0 {
-//             self.state.direction_on_bridge = None;
-//             println!("[Puente {}] Puente ahora VACÍO.", self.id);
-//         }
+        let mut state = self.state.lock().unwrap();
 
-//         // --- Lógica para despertar al siguiente hilo ---
-//         // Buscamos en la cola de espera el hilo más prioritario que AHORA SÍ PUEDA PASAR.
-//         let mut best_idx_to_wake: Option<usize> = None;
-//         for (i, &(_, _, dir)) in self.state.waiting_threads.iter().enumerate() {
-//             // Re-evaluamos si este hilo puede pasar bajo las condiciones actuales
-//              let can_pass_now = match &self.logic {
-//                 BridgeLogic::TrafficLight { current_direction, .. } => *current_direction == dir,
-//                 BridgeLogic::Yield { priority_direction, .. } => {
-//                     let other_dir_waiting = self.state.waiting_threads.iter().any(|(_,_,d)| *d != dir);
-//                     dir == *priority_direction || !other_dir_waiting
-//                 },
-//                 BridgeLogic::Drawbridge { .. } => !self.state.is_boat_passing,
-//             };
+        // Barco solo puede pasar si no hay vehículos en el puente
+        if state.vehicles_on_bridge > 0 || state.is_boat_passing {
+            drop(state);
+            my_mutex_unlock(&self.mutex);
+            println!("[Puente {}] ⛵ Barco bloqueado", self.id);
+            return ThreadSignal::Block;
+        }
 
-//             if can_pass_now {
-//                 best_idx_to_wake = Some(i);
-//                 break; // Encontramos al mejor candidato (la lista ya está ordenada por prioridad)
-//             }
-//         }
+        state.is_boat_passing = true;
+        println!("[Puente {}] ⛵ Barco pasando, puente levantado", self.id);
 
-//         if let Some(idx) = best_idx_to_wake {
-//             let (_, tid, dir) = self.state.waiting_threads.remove(idx);
-//             thread_to_wake = Some(tid);
-//             println!("[Puente {}] Despertando hilo {} (dir {:?}) de la cola.", self.id, tid, dir);
-//         }
+        drop(state);
+        my_mutex_unlock(&self.mutex);
+        ThreadSignal::Continue
+    }
 
-//         my_mutex_unlock(rt, &mut self.mutex);
-
-//         if let Some(tid) = thread_to_wake {
-//             rt.wake(tid);
-//         }
-//     }
-
-//     // Lógica para barcos (aplica principalmente al Drawbridge)
-//     // Se puede mantener similar, ya que es más simple: o pasa o no.
-//     pub fn request_pass_boat(&mut self, rt: &mut ThreadRuntime) -> ThreadSignal {
-//          if my_mutex_lock(rt, &mut self.mutex) == ThreadSignal::Block { return ThreadSignal::Block; }
-
-//         if self.state.vehicles_on_bridge > 0 || self.state.is_boat_passing {
-//             // Bloqueado, pero no lo metemos a la cola para no complicar el ejemplo.
-//             // Una implementación más robusta tendría una cola para barcos.
-//             my_mutex_unlock(rt, &mut self.mutex);
-//             return ThreadSignal::Block;
-//         }
-
-//         self.state.is_boat_passing = true;
-//         println!("[Puente Levadizo {}] BARCO pasando. Bloqueando tráfico de vehículos.", self.id);
-//         my_mutex_unlock(rt, &mut self.mutex);
-//         ThreadSignal::Continue
-//     }
-
-//     pub fn release_pass_boat(&mut self, rt: &mut ThreadRuntime) {
-//         my_mutex_lock(rt, &mut self.mutex);
-//         self.state.is_boat_passing = false;
-//         println!("[Puente Levadizo {}] BARCO ha pasado. Liberando tráfico.", self.id);
-
-//         // Despertamos a todos los vehículos para que re-intenten cruzar
-//         let threads_to_wake = self.state.waiting_threads.drain(..).collect::<Vec<_>>();
-//         my_mutex_unlock(rt, &mut self.mutex);
-
-//         for (_, tid, _) in threads_to_wake {
-//             rt.wake(tid);
-//         }
-//     }
-// }
+    /// Un barco notifica que terminó de pasar
+    pub fn release_pass_boat(&self) {
+        my_mutex_lock(&self.mutex);
+        let mut state = self.state.lock().unwrap();
+        state.is_boat_passing = false;
+        println!("[Puente {}] ✅ Barco salió, puente bajado", self.id);
+        drop(state);
+        my_mutex_unlock(&self.mutex);
+    }
+}

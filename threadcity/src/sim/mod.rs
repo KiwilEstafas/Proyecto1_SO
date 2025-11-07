@@ -1,5 +1,10 @@
 // ciudad y avance de simulacion
 
+mod spawner;    
+mod simulation; 
+
+pub use spawner::{VehicleSpawner, CityLayout};
+pub use simulation::{ThreadCitySimulation, run_threadcity_simulation};
 use std::thread;
 use std::time::Duration;
 
