@@ -1,6 +1,6 @@
 // Simulación principal integrada con mypthreads v2
 
-use crate::agents::agent_controller::{AgentContext, AgentPhase};
+use crate::agents::agent_controller::AgentContext;
 use crate::model::{Bridge, Coord, DeadlinePolicy, NuclearPlant, PlantStatus, SupplyKind, SupplySpec, TrafficDirection};
 use crate::sim::spawner::{CityLayout, VehicleSpawner};
 use mypthreads::mypthreads_api::*;
@@ -11,7 +11,7 @@ use std::sync::{Arc, Mutex};
 
 pub struct ThreadCitySimulation {
     layout: CityLayout,
-    bridges: Vec<Arc<Bridge>>,
+    bridges: Vec<Arc<Mutex<Bridge>>>,
     plants: Arc<Mutex<Vec<NuclearPlant>>>,
     spawner: VehicleSpawner,
     truck_threads: HashMap<ThreadId, SupplyKind>,
@@ -24,15 +24,15 @@ impl ThreadCitySimulation {
 
         // Crear puentes
         let bridges = vec![
-            Arc::new(Bridge::new_traffic_light(1, layout.bridge1_row, 5000)),
-            Arc::new(Bridge::new_yield(2, layout.bridge2_row, TrafficDirection::WestToEast)),
-            Arc::new(Bridge::new_drawbridge(3, layout.bridge3_row)),
+            Arc::new(Mutex::new(Bridge::new_traffic_light(1, layout.bridge1_row, 5000))),
+            Arc::new(Mutex::new(Bridge::new_yield(2, layout.bridge2_row, TrafficDirection::WestToEast))),
+            Arc::new(Mutex::new(Bridge::new_drawbridge(3, layout.bridge3_row))),
         ];
 
         // Crear plantas nucleares
         let plant1 = NuclearPlant::new(
             1,
-            Coord::new(0, 1), // Zona oeste
+            Coord::new(0, 1),
             vec![
                 SupplySpec {
                     kind: SupplyKind::Radioactive,
@@ -52,7 +52,7 @@ impl ThreadCitySimulation {
 
         let plant2 = NuclearPlant::new(
             2,
-            Coord::new(1, 3), // Zona este
+            Coord::new(1, 3),
             vec![
                 SupplySpec {
                     kind: SupplyKind::Radioactive,
@@ -123,8 +123,8 @@ impl ThreadCitySimulation {
 
             // Actualizar estado de puentes (semáforos)
             for bridge in self.bridges.iter() {
-                let bridge_mut = Arc::get_mut(&mut bridge.clone()).unwrap();
-                bridge_mut.step(100);
+                let mut bridge_guard = bridge.lock().unwrap();
+                bridge_guard.step(100);
             }
 
             // Verificar estado de plantas nucleares
@@ -168,11 +168,15 @@ impl ThreadCitySimulation {
             Coord::new(4, 4)
         };
 
+        let bridges_clone: Vec<Arc<Bridge>> = self.bridges.iter()
+            .map(|b| Arc::new(b.lock().unwrap().clone()))
+            .collect();
+
         let context = Arc::new(Mutex::new(AgentContext::new(
             agent,
             destination,
             self.layout.river_column,
-            self.bridges.clone(),
+            bridges_clone,
         )));
 
         let context_clone = context.clone();
@@ -189,12 +193,9 @@ impl ThreadCitySimulation {
 
     fn check_plants_status(&mut self) {
         let mut plants = self.plants.lock().unwrap();
-        // TODO: Implementar lógica de verificación de deadlines
-        // Por ahora solo un placeholder
         for plant in plants.iter_mut() {
             if plant.status == PlantStatus::Ok {
-                // Verificar si algún deadline está cerca de vencerse
-                // Activar urgencia en camiones si es necesario
+                // Verificar deadlines
             }
         }
     }

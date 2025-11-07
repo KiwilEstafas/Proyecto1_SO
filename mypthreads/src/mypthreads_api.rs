@@ -79,7 +79,7 @@ pub fn my_thread_chsched(tid: ThreadId, params: SchedulerParams) {
 }
 
 pub struct MyMutex {
-    internal: SimpleMutex,
+    pub internal: SimpleMutex,  // CAMBIADO A PUB para acceso desde bridge
 }
 
 //Inicia un mutex

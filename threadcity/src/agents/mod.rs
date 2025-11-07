@@ -3,7 +3,7 @@ mod car;
 mod ambulance;
 mod boat;
 mod cargotruck;
-mod agent_controller;
+pub mod agent_controller;
 
 pub use vehicle::{Agent, AgentDowncast, Vehicle, AgentState};
 pub use car::Car;

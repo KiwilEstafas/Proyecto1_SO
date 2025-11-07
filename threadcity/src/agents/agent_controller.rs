@@ -1,9 +1,8 @@
 // Controlador de agentes que usa ThreadSignal
 
-use crate::agents::{Agent, AgentDowncast, Car, Ambulance, Boat, CargoTruck};
 use crate::model::{Bridge, Coord, TrafficDirection};
 use mypthreads::signals::ThreadSignal;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 /// Estado de un agente durante la simulación
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -11,13 +10,13 @@ pub enum AgentPhase {
     Traveling,
     ApproachingBridge,
     WaitingForBridge,
-    CrossingBridge(u32), // contador de progreso
+    CrossingBridge(u32),
     Arrived,
 }
 
 /// Contexto compartido para un agente
 pub struct AgentContext {
-    pub agent: Box<dyn AgentDowncast + Send>,
+    pub agent: Box<dyn crate::agents::AgentDowncast + Send>,
     pub phase: AgentPhase,
     pub destination: Coord,
     pub river_column: u32,
@@ -26,7 +25,7 @@ pub struct AgentContext {
 
 impl AgentContext {
     pub fn new(
-        agent: Box<dyn AgentDowncast + Send>,
+        agent: Box<dyn crate::agents::AgentDowncast + Send>,
         destination: Coord,
         river_column: u32,
         bridges: Vec<Arc<Bridge>>,
@@ -40,21 +39,18 @@ impl AgentContext {
         }
     }
 
-    /// Función principal del agente que retorna ThreadSignal
     pub fn step(&mut self) -> ThreadSignal {
         let pos = self.agent.pos();
         let dest = self.destination;
 
         match self.phase {
             AgentPhase::Traveling => {
-                // Verificar si llegó al destino
                 if pos.x == dest.x && pos.y == dest.y {
                     println!("[Agent-{}] ✅ LLEGÓ al destino", self.agent.id());
                     self.phase = AgentPhase::Arrived;
                     return ThreadSignal::Exit;
                 }
 
-                // Verificar si necesita cruzar el río
                 let needs_bridge = (pos.y < self.river_column && dest.y > self.river_column)
                     || (pos.y > self.river_column && dest.y < self.river_column);
 
@@ -66,26 +62,20 @@ impl AgentContext {
                     };
 
                     if at_entrance {
-                        println!(
-                            "[Agent-{}] 🌉 Llegando a entrada del puente",
-                            self.agent.id()
-                        );
+                        println!("[Agent-{}] 🌉 Llegando a entrada del puente", self.agent.id());
                         self.phase = AgentPhase::ApproachingBridge;
                         return ThreadSignal::Yield;
                     }
                 }
 
-                // Moverse hacia el destino
                 self.move_towards_destination();
                 ThreadSignal::Yield
             }
 
             AgentPhase::ApproachingBridge => {
-                // Determinar qué puente usar
                 let bridge = self.select_nearest_bridge();
                 let direction = self.get_crossing_direction();
 
-                // Barcos van directo al puente levadizo
                 if self.is_boat() {
                     let signal = bridge.request_pass_boat();
                     if signal == ThreadSignal::Continue {
@@ -96,7 +86,6 @@ impl AgentContext {
                     return signal;
                 }
 
-                // Vehículos terrestres
                 let is_ambulance = self.is_ambulance();
                 let signal = bridge.request_pass_vehicle(direction, is_ambulance);
 
@@ -110,7 +99,6 @@ impl AgentContext {
             }
 
             AgentPhase::WaitingForBridge => {
-                // Reintentar pedir paso
                 let bridge = self.select_nearest_bridge();
                 let direction = self.get_crossing_direction();
 
@@ -136,7 +124,6 @@ impl AgentContext {
                 let crossing_time = if self.is_boat() { 5 } else { 3 };
 
                 if progress >= crossing_time {
-                    // Terminó de cruzar
                     println!("[Agent-{}] ✅ Cruzó el puente", self.agent.id());
 
                     let bridge = self.select_nearest_bridge();
@@ -146,12 +133,10 @@ impl AgentContext {
                         bridge.release_pass_vehicle();
                     }
 
-                    // Actualizar posición
                     let mut new_pos = self.agent.pos();
                     if self.is_boat() {
-                        new_pos.x += 1; // Barco sigue por el río
+                        new_pos.x += 1;
                     } else {
-                        // Vehículo cruza horizontalmente
                         if new_pos.y < self.river_column {
                             new_pos.y = self.river_column + 1;
                         } else {
@@ -208,10 +193,10 @@ impl AgentContext {
     }
 
     fn is_boat(&self) -> bool {
-        self.agent.as_any().downcast_ref::<Boat>().is_some()
+        self.agent.as_any().downcast_ref::<crate::agents::Boat>().is_some()
     }
 
     fn is_ambulance(&self) -> bool {
-        self.agent.as_any().downcast_ref::<Ambulance>().is_some()
+        self.agent.as_any().downcast_ref::<crate::agents::Ambulance>().is_some()
     }
 }

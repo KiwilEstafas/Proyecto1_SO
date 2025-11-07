@@ -1,7 +1,7 @@
 // Sistema de spawning compatible con mypthreads v2
 
 use crate::agents::{Car, Ambulance, Boat, CargoTruck, AgentDowncast};
-use crate::model::{SupplyKind, NuclearPlant};
+use crate::model::NuclearPlant;
 use rand::Rng;
 use rand_distr::{Distribution, Poisson};
 
@@ -43,7 +43,7 @@ pub struct VehicleSpawner {
 impl VehicleSpawner {
     pub fn new(mean_spawn_rate: f64) -> Self {
         Self {
-            rng: rand::rng(),
+            rng: rand::thread_rng(),
             poisson: Poisson::new(mean_spawn_rate).unwrap(),
             vehicles_spawned: 0,
             boats_spawned: 0,
@@ -57,15 +57,15 @@ impl VehicleSpawner {
     }
 
     fn random_position(&mut self, layout: &CityLayout, avoid_river: bool) -> (u32, u32) {
-        let row = self.rng.random_range(0..layout.grid_rows);
+        let row = self.rng.gen_range(0..layout.grid_rows);
         let col = if avoid_river {
-            if self.rng.random_bool(0.5) {
-                self.rng.random_range(0..layout.river_column)
+            if self.rng.gen_range(0.0..1.0) < 0.5 {
+                self.rng.gen_range(0..layout.river_column)
             } else {
-                self.rng.random_range((layout.river_column + 1)..layout.grid_cols)
+                self.rng.gen_range((layout.river_column + 1)..layout.grid_cols)
             }
         } else {
-            self.rng.random_range(0..layout.grid_cols)
+            self.rng.gen_range(0..layout.grid_cols)
         };
         (row, col)
     }
@@ -106,7 +106,7 @@ impl VehicleSpawner {
         let origin = self.random_position(layout, true);
         let destination = self.random_destination(origin, layout, true);
 
-        let vehicle_type = self.rng.random_range(0..10);
+        let vehicle_type = self.rng.gen_range(0..10);
         let id = self.next_vehicle_id;
         self.next_vehicle_id += 1;
         self.vehicles_spawned += 1;
@@ -130,7 +130,7 @@ impl VehicleSpawner {
         self.boats_spawned += 1;
         self.last_boat_spawn_tick = current_tick;
 
-        let start_row = self.rng.random_range(layout.bridge1_row..=layout.bridge2_row);
+        let start_row = self.rng.gen_range(layout.bridge1_row..=layout.bridge2_row);
         let origin = (start_row, layout.river_column);
         let dest_row = layout.bridge3_row + 1;
         let destination = (dest_row, layout.river_column);
@@ -150,21 +150,20 @@ impl VehicleSpawner {
         self.trucks_spawned += 1;
         self.last_truck_spawn_tick = current_tick;
 
-        let plant_idx = self.rng.random_range(0..plants.len());
+        let plant_idx = self.rng.gen_range(0..plants.len());
         let plant = &plants[plant_idx];
         let destination = (plant.loc.x, plant.loc.y);
 
-        let supply_idx = self.rng.random_range(0..plant.requires.len());
+        let supply_idx = self.rng.gen_range(0..plant.requires.len());
         let cargo = plant.requires[supply_idx].kind;
 
-        // Origen en el lado opuesto al río
         let origin = if destination.1 < layout.river_column {
-            let row = self.rng.random_range(0..layout.grid_rows);
-            let col = self.rng.random_range((layout.river_column + 1)..layout.grid_cols);
+            let row = self.rng.gen_range(0..layout.grid_rows);
+            let col = self.rng.gen_range((layout.river_column + 1)..layout.grid_cols);
             (row, col)
         } else {
-            let row = self.rng.random_range(0..layout.grid_rows);
-            let col = self.rng.random_range(0..layout.river_column);
+            let row = self.rng.gen_range(0..layout.grid_rows);
+            let col = self.rng.gen_range(0..layout.river_column);
             (row, col)
         };
 
