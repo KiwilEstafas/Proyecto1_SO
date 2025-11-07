@@ -131,18 +131,23 @@ impl SimpleMutex {
     }
 
     /// libera el lock
+    /// Si hay un hilo esperando, la propiedad del lock se le da directamente a ese hilo
     /// retorna el siguiente hilo en espera si hay alguno
     pub fn unlock(&self, tid: ThreadId) -> Option<ThreadId> {
         let mut locked = self.locked.lock().unwrap();
         
         if *locked != Some(tid) {
-            panic!("hilo {:?} intenta liberar mutex que no posee", tid);
+            panic!("hilo {:?} intenta liberar mutex que no posee (dueño actual: {:?})", tid, *locked);
         }
+
+        //Sacaar el siguiente hilo de la cola de espera
+        let next_in_queue = self.wait_queue.lock().unwrap().pop_front();
+
+        //Pasar el lock al siguiente
+        //Si no hay nadie esperando, entonces el lock queda libre
+        *locked = next_in_queue;
         
-        *locked = None;
-        drop(locked);
-        
-        // despertar al siguiente en la cola
-        self.wait_queue.lock().unwrap().pop_front()
+        //retornar el ID del hilo que se tiene que desspertar
+        next_in_queue
     }
 }

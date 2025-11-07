@@ -44,6 +44,9 @@ pub enum ThreadResponse {
     Block,
     Exit,
     Continue,
+    Join(ThreadId),
+    MutexLock(usize),
+    MutexUnlock(usize),
 }
 
 impl ThreadResponse {

@@ -56,12 +56,12 @@ Esta guía te ayudará a reestructurar tu proyecto, pasando de un modelo de simu
     -   Su única función es transferir el control de vuelta al planificador. Debe llamar a `switch(&mut current_thread.context, &runtime.runtime_context)`.
     -  reality: Hilos devuelven ThreadSignal::Yield (vía API de contexto) y el wrapper lo traduce a ThreadResponse::Yield so runtime reencola
 
--   [ ] **Implementar `my_thread_end()`:**
+-   [X] **Implementar `my_thread_end()`:**
     -   Marca el estado del hilo actual como `Terminated`.
     -   Despierta a cualquier hilo que estuviera esperando en `join` (mueve sus estados a `Ready`).
     -   Llama a `switch` para volver permanentemente al planificador.
 
--   [ ] **Implementar `my_thread_join()`:**
+-   [ X] **Implementar `my_thread_join()`:**
     -   Si el hilo objetivo no ha terminado:
         1.  Añade el hilo actual a la lista `joiners` del hilo objetivo.
         2.  Cambia el estado del hilo actual a `Blocked`.
@@ -72,14 +72,14 @@ Esta guía te ayudará a reestructurar tu proyecto, pasando de un modelo de simu
 ### **Fase 4: Implementar Primitivas de Sincronización (Mutex)**
 *Objetivo: Utilizar el sistema de bloqueo para crear mutex funcionales.*
 
--   [ ] **Implementar `my_mutex_lock()`:**
+-   [X] **Implementar `my_mutex_lock()`:**
     -   Si el mutex está libre, tómalo y retorna.
     -   Si está ocupado:
         1.  Añade el hilo actual a la `wait_queue` del mutex.
         2.  Cambia el estado del hilo a `Blocked`.
         3.  Llama a `my_thread_yield()` para ceder el procesador.
 
--   [ ] **Implementar `my_mutex_unlock()`:**
+-   [X] **Implementar `my_mutex_unlock()`:**
     -   Libera el mutex.
     -   Si la `wait_queue` no está vacía, saca el siguiente hilo y cambia su estado de `Blocked` a `Ready` para que el planificador pueda ejecutarlo.
 
@@ -88,7 +88,7 @@ Esta guía te ayudará a reestructurar tu proyecto, pasando de un modelo de simu
 ### **Fase 5: Finalización, Limpieza y Schedulers Avanzados**
 *Objetivo: Completar las funcionalidades requeridas y limpiar la memoria.*
 
--   [ ] **Implementar `my_thread_detach()`:**
+-   [X] **Implementar `my_thread_detach()`:**
     -   Marca un hilo para que sus recursos se liberen automáticamente al terminar.
 
 -   [ ] **Asegurar la Liberación de Memoria:**

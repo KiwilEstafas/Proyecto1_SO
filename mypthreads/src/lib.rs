@@ -8,6 +8,7 @@ pub mod channels;
 pub mod api_context; 
 pub mod signals;
 pub mod context_wrapper;
+pub mod mypthreads_api;
 
 // Tipos públicos de la biblioteca
 pub use runtime::ThreadRuntimeV2;
