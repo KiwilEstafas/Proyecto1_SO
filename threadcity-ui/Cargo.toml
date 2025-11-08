@@ -4,13 +4,12 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-# Dependencias para la interfaz gráfica
-gtk4 = "0.10.2"
-glib = "0.21.4"
-cairo-rs = "0.21.2"
-
-
-# Dependencias a tus otros crates locales
+gtk = { version = "0.18", features = ["v3_24"] }
+gdk = "0.18"
+cairo-rs = "0.18"
+glib = "0.18"
 threadcity = { path = "../threadcity" }
 mypthreads = { path = "../mypthreads" }
-gtk = "0.18.2"
+
+[features]
+default = []
