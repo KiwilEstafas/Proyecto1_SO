@@ -114,12 +114,12 @@ fn render_river(cr: &Context, river_col: u32, rows: u32) {
 
 fn render_bridges(cr: &Context, layout: &threadcity::CityLayout) {
     let bridges_info = [
-        (layout.bridge1_row, "🚦", "Semáforo"),
-        (layout.bridge2_row, "⚠️", "Ceda"),
-        (layout.bridge3_row, "🌉", "Levadizo"),
+        (layout.bridge1_row, "Semáforo"),
+        (layout.bridge2_row, "Ceda"),
+        (layout.bridge3_row, "Levadizo"),
     ];
     
-    for (row, emoji, name) in bridges_info {
+    for (row, name) in bridges_info {
         let x = MARGIN + layout.river_column as f64 * CELL_SIZE;
         let y = MARGIN + row as f64 * CELL_SIZE;
         

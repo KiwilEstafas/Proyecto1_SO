@@ -2,7 +2,6 @@
 
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, ScrolledWindow, TextView};
-use glib::signal::Inhibit;
 use glib::ControlFlow;
 use std::sync::{Arc, Mutex};
 use crate::simulation::SimulationState;
@@ -69,7 +68,7 @@ fn create_controls(ui_state: Arc<Mutex<UIState>>) -> GtkBox {
     let btn_start = Button::with_label("▶ Iniciar");
     let ui_clone = Arc::clone(&ui_state);
     btn_start.connect_clicked(move |btn| {
-        let mut state = ui_clone.lock().unwrap();
+        let state = ui_clone.lock().unwrap();
         let mut is_running = state.is_running.lock().unwrap();
         
         if *is_running {
@@ -95,7 +94,7 @@ fn create_controls(ui_state: Arc<Mutex<UIState>>) -> GtkBox {
     let btn_reset = Button::with_label("🔄 Reiniciar");
     let ui_clone = Arc::clone(&ui_state);
     btn_reset.connect_clicked(move |_| {
-        let mut state = ui_clone.lock().unwrap();
+        let state = ui_clone.lock().unwrap();
         *state.is_running.lock().unwrap() = false;
         *state.simulation.lock().unwrap() = None;
         println!("🔄 Simulación reiniciada");
@@ -107,8 +106,9 @@ fn create_controls(ui_state: Arc<Mutex<UIState>>) -> GtkBox {
     let ui_clone = Arc::clone(&ui_state);
     btn_step.connect_clicked(move |_| {
         let state = ui_clone.lock().unwrap();
-        if let Some(ref _sim) = *state.simulation.lock().unwrap() {
-            // TODO: Ejecutar un solo ciclo
+        let mut sim_lock = state.simulation.lock().unwrap();
+        if let Some(ref mut sim) = *sim_lock {
+            sim.step();
             println!("⏭️  Ejecutando un ciclo");
         }
     });
@@ -158,7 +158,7 @@ fn create_canvas(ui_state: Arc<Mutex<UIState>>) -> ScrolledWindow {
         } else {
             renderer::render_empty(cr, widget);
         }
-        Inhibit(false)
+        glib::Propagation::Proceed
     });
 
     // Timer para actualizar el canvas
@@ -171,7 +171,8 @@ fn create_canvas(ui_state: Arc<Mutex<UIState>>) -> ScrolledWindow {
             
             if is_running {
                 // Actualizar simulación
-                if let Some(ref mut sim) = *state.simulation.lock().unwrap() {
+                let mut sim_lock = state.simulation.lock().unwrap();
+                if let Some(ref mut sim) = *sim_lock {
                     sim.step();
                 }
                 
@@ -236,4 +237,3 @@ fn create_info_panel(_ui_state: Arc<Mutex<UIState>>) -> GtkBox {
 
     panel
 }
-

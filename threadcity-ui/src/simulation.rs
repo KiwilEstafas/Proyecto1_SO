@@ -53,10 +53,10 @@ impl SimulationState {
         }
         
         // Camiones
-        spawn_visual_truck(200, SupplyKind::Radioactive, (0, 0), (1, 0), &layout, &shared_city, Arc::clone(&agents));
-        spawn_visual_truck(201, SupplyKind::Water, (0, 0), (1, 0), &layout, &shared_city, Arc::clone(&agents));
-        spawn_visual_truck(202, SupplyKind::Radioactive, (0, 4), (2, 4), &layout, &shared_city, Arc::clone(&agents));
-        spawn_visual_truck(203, SupplyKind::Water, (0, 4), (2, 4), &layout, &shared_city, Arc::clone(&agents));
+        spawn_visual_truck(200, SupplyKind::Radioactive, (0, 0), (1, 0), &shared_city, Arc::clone(&agents));
+        spawn_visual_truck(201, SupplyKind::Water, (0, 0), (1, 0), &shared_city, Arc::clone(&agents));
+        spawn_visual_truck(202, SupplyKind::Radioactive, (0, 4), (2, 4), &shared_city, Arc::clone(&agents));
+        spawn_visual_truck(203, SupplyKind::Water, (0, 4), (2, 4), &shared_city, Arc::clone(&agents));
         total += 4;
         
         // Barco
@@ -88,7 +88,6 @@ impl SimulationState {
 // Funciones auxiliares para crear agentes visuales
 
 fn spawn_visual_car(id: u32, layout: &CityLayout, city: &SharedCity, agents: Arc<Mutex<Vec<VisualAgent>>>) {
-    use rand::Rng;
     let mut rng = rand::rng();
     
     let origin = random_position(&mut rng, layout);
@@ -103,7 +102,7 @@ fn spawn_visual_car(id: u32, layout: &CityLayout, city: &SharedCity, agents: Arc
     });
     
     // Crear hilo (simplificado)
-    let city_clone = Arc::clone(city);
+    let _city_clone = Arc::clone(city);
     let agents_clone = Arc::clone(&agents);
     let mut pos = origin;
     
@@ -140,7 +139,6 @@ fn spawn_visual_car(id: u32, layout: &CityLayout, city: &SharedCity, agents: Arc
 }
 
 fn spawn_visual_ambulance(id: u32, layout: &CityLayout, city: &SharedCity, agents: Arc<Mutex<Vec<VisualAgent>>>) {
-    use rand::Rng;
     let mut rng = rand::rng();
     
     let origin = random_position(&mut rng, layout);
@@ -153,7 +151,7 @@ fn spawn_visual_ambulance(id: u32, layout: &CityLayout, city: &SharedCity, agent
         dest,
     });
     
-    let city_clone = Arc::clone(city);
+    let _city_clone = Arc::clone(city);
     let agents_clone = Arc::clone(&agents);
     let mut pos = origin;
     
@@ -190,7 +188,6 @@ fn spawn_visual_truck(
     cargo: SupplyKind,
     origin: (u32, u32),
     dest: (u32, u32),
-    layout: &CityLayout,
     city: &SharedCity,
     agents: Arc<Mutex<Vec<VisualAgent>>>,
 ) {
@@ -274,7 +271,7 @@ fn spawn_visual_boat(id: u32, layout: &CityLayout, city: &SharedCity, agents: Ar
         dest,
     });
     
-    let city_clone = Arc::clone(city);
+    let _city_clone = Arc::clone(city);
     let agents_clone = Arc::clone(&agents);
     let mut pos = origin;
     

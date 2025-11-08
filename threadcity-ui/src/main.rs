@@ -6,7 +6,7 @@ mod simulation;
 
 use gtk::prelude::*;
 use gtk::{Application, ApplicationWindow};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
 const APP_ID: &str = "com.threadcity.ui";
 
