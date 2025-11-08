@@ -2,6 +2,8 @@
 
 use gtk::prelude::*;
 use gtk::{Box as GtkBox, Button, DrawingArea, Label, Orientation, ScrolledWindow, TextView};
+use glib::signal::Inhibit;
+use glib::ControlFlow;
 use std::sync::{Arc, Mutex};
 use crate::simulation::SimulationState;
 use crate::renderer;
@@ -105,7 +107,7 @@ fn create_controls(ui_state: Arc<Mutex<UIState>>) -> GtkBox {
     let ui_clone = Arc::clone(&ui_state);
     btn_step.connect_clicked(move |_| {
         let state = ui_clone.lock().unwrap();
-        if let Some(ref sim) = *state.simulation.lock().unwrap() {
+        if let Some(ref _sim) = *state.simulation.lock().unwrap() {
             // TODO: Ejecutar un solo ciclo
             println!("⏭️  Ejecutando un ciclo");
         }
@@ -139,7 +141,7 @@ fn create_controls(ui_state: Arc<Mutex<UIState>>) -> GtkBox {
 }
 
 fn create_canvas(ui_state: Arc<Mutex<UIState>>) -> ScrolledWindow {
-    let scrolled = ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
+    let scrolled = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     scrolled.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     
     // Área de dibujo
@@ -149,33 +151,35 @@ fn create_canvas(ui_state: Arc<Mutex<UIState>>) -> ScrolledWindow {
     // Conectar evento de dibujo
     let ui_clone = Arc::clone(&ui_state);
     drawing_area.connect_draw(move |widget, cr| {
-        let state = ui_clone.lock().unwrap();
-        if let Some(ref sim) = *state.simulation.lock().unwrap() {
+        // Evitar locks anidados: clonar Arc y luego lockear ese Arc
+        let sim_arc = { ui_clone.lock().unwrap().simulation.clone() };
+        if let Some(ref sim) = *sim_arc.lock().unwrap() {
             renderer::render_city(cr, widget, sim);
         } else {
             renderer::render_empty(cr, widget);
         }
-        gtk::Inhibit(false)
+        Inhibit(false)
     });
 
     // Timer para actualizar el canvas
     let ui_clone = Arc::clone(&ui_state);
     let drawing_clone = drawing_area.clone();
     glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
-        let state = ui_clone.lock().unwrap();
-        let is_running = *state.is_running.lock().unwrap();
-        
-        if is_running {
-            // Actualizar simulación
-            if let Some(ref mut sim) = *state.simulation.lock().unwrap() {
-                sim.step();
-            }
+        {
+            let state = ui_clone.lock().unwrap();
+            let is_running = *state.is_running.lock().unwrap();
             
-            // Redibujar
-            drawing_clone.queue_draw();
+            if is_running {
+                // Actualizar simulación
+                if let Some(ref mut sim) = *state.simulation.lock().unwrap() {
+                    sim.step();
+                }
+                
+                // Redibujar
+                drawing_clone.queue_draw();
+            }
         }
-        
-        glib::Continue(true)
+        ControlFlow::Continue
     });
 
     scrolled.add(&drawing_area);
@@ -192,7 +196,7 @@ fn create_info_panel(_ui_state: Arc<Mutex<UIState>>) -> GtkBox {
     panel.pack_start(&title, false, false, 5);
 
     // Área de texto con scroll
-    let scrolled = ScrolledWindow::new(gtk::NONE_ADJUSTMENT, gtk::NONE_ADJUSTMENT);
+    let scrolled = gtk::ScrolledWindow::new(None::<&gtk::Adjustment>, None::<&gtk::Adjustment>);
     scrolled.set_policy(gtk::PolicyType::Automatic, gtk::PolicyType::Automatic);
     
     let text_view = TextView::new();
@@ -232,3 +236,4 @@ fn create_info_panel(_ui_state: Arc<Mutex<UIState>>) -> GtkBox {
 
     panel
 }
+

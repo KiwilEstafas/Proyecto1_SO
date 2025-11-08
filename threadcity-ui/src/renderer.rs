@@ -2,6 +2,7 @@
 
 use cairo::Context;
 use gtk::DrawingArea;
+use gtk::prelude::*;
 use crate::simulation::SimulationState;
 
 const CELL_SIZE: f64 = 80.0;
