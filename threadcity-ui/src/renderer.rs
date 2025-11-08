@@ -209,32 +209,20 @@ fn render_agents(cr: &Context, sim: &SimulationState) {
             }
         }
         
-        // Dibujar vehículo como rectángulo (offset para no solapar con plantas)
-        let offset_x = if agent.agent_type == crate::simulation::VisualAgentType::Truck {
-            CELL_SIZE * 0.15 // Camiones más a la izquierda
-        } else {
-            CELL_SIZE * 0.3
-        };
-        
-        let offset_y = if agent.agent_type == crate::simulation::VisualAgentType::Truck {
-            CELL_SIZE * 0.15
-        } else {
-            CELL_SIZE * 0.3
-        };
-        
+        // Dibujar vehículo como rectángulo
         cr.rectangle(
-            x + offset_x,
-            y + offset_y,
-            CELL_SIZE * 0.35,
-            CELL_SIZE * 0.35
+            x + CELL_SIZE * 0.3,
+            y + CELL_SIZE * 0.3,
+            CELL_SIZE * 0.4,
+            CELL_SIZE * 0.4
         );
         cr.fill().unwrap();
         
         // ID del agente
         cr.set_source_rgb(1.0, 1.0, 1.0);
         cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
-        cr.set_font_size(9.0);
-        cr.move_to(x + offset_x + 5.0, y + offset_y + 15.0);
+        cr.set_font_size(10.0);
+        cr.move_to(x + CELL_SIZE * 0.35, y + CELL_SIZE * 0.55);
         cr.show_text(&format!("{}", agent.id)).unwrap();
     }
 }
@@ -244,44 +232,38 @@ fn render_legend(cr: &Context) {
     let legend_y = MARGIN + 6.0 * CELL_SIZE + 20.0;
     
     cr.set_source_rgb(1.0, 1.0, 1.0);
-    cr.rectangle(legend_x, legend_y, 400.0, 150.0);
+    cr.rectangle(legend_x, legend_y, 350.0, 100.0);
     cr.fill().unwrap();
     
     cr.set_source_rgb(0.0, 0.0, 0.0);
     cr.set_line_width(2.0);
-    cr.rectangle(legend_x, legend_y, 400.0, 150.0);
+    cr.rectangle(legend_x, legend_y, 350.0, 100.0);
     cr.stroke().unwrap();
     
     cr.select_font_face("Sans", cairo::FontSlant::Normal, cairo::FontWeight::Bold);
     cr.set_font_size(14.0);
     cr.move_to(legend_x + 10.0, legend_y + 20.0);
-    cr.show_text("Leyenda de Agentes:").unwrap();
+    cr.show_text("Leyenda:").unwrap();
     
     let items = [
-        (0.2, 0.2, 0.8, "Carros (Azul)"),
-        (1.0, 0.0, 0.0, "Ambulancias (Rojo)"),
-        (0.6, 0.4, 0.0, "Camiones (Café)"),
-        (0.0, 0.5, 0.7, "Barcos (Azul oscuro)"),
+        (0.2, 0.2, 0.8, "🚗 Carros"),
+        (1.0, 0.0, 0.0, "🚑 Ambulancias"),
+        (0.6, 0.4, 0.0, "🚚 Camiones"),
+        (0.0, 0.5, 0.7, "⛵ Barcos"),
     ];
     
     cr.set_font_size(12.0);
     for (i, (r, g, b, text)) in items.iter().enumerate() {
-        let y_offset = legend_y + 45.0 + i as f64 * 22.0;
+        let y_offset = legend_y + 40.0 + i as f64 * 18.0;
         
-        // Cuadrado de color más grande
+        // Cuadrado de color
         cr.set_source_rgb(*r, *g, *b);
-        cr.rectangle(legend_x + 15.0, y_offset - 12.0, 18.0, 18.0);
+        cr.rectangle(legend_x + 15.0, y_offset - 10.0, 12.0, 12.0);
         cr.fill().unwrap();
         
         // Texto
         cr.set_source_rgb(0.0, 0.0, 0.0);
-        cr.move_to(legend_x + 40.0, y_offset);
+        cr.move_to(legend_x + 35.0, y_offset);
         cr.show_text(text).unwrap();
     }
-    
-    // Añadir info de comercios y plantas
-    cr.set_font_size(11.0);
-    cr.set_source_rgb(0.4, 0.4, 0.4);
-    cr.move_to(legend_x + 10.0, legend_y + 135.0);
-    cr.show_text("🟧 Comercios (cuadrados naranjas) | ☢ Plantas nucleares").unwrap();
 }
