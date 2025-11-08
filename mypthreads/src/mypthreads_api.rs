@@ -1,13 +1,13 @@
-//EL frontend que llamaria la simulacion de la ciudad
+//EL frontend que  llamaria la simulacion de la ciudad
 use crate::api_context;
 use crate::channels::SimpleMutex;
 use crate::runtime::ThreadRuntimeV2;
 use crate::signals::ThreadSignal;
-use crate::thread::{SchedulerType, ThreadId};
+use crate::thread::{SchedulerType, ThreadId, ThreadState};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
-//Crear la instancia global del runtime
+//Crear la instancia globak del runtime
 static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
 
 //Parametros que se necesitan para la creacion de hilos (a futuro podria cambiar)
@@ -47,7 +47,6 @@ pub fn my_thread_end() {
 pub fn my_thread_join(target_tid: ThreadId) -> ThreadSignal {
     ThreadSignal::Join(target_tid)
 }
-
 //Desvincula un hilo, haciendo que sus recursos se liberen al terminar
 pub fn my_thread_detach(tid: ThreadId) {
     if let Ok(mut runtime) = RUNTIME.lock() {
@@ -58,11 +57,11 @@ pub fn my_thread_detach(tid: ThreadId) {
     }
 }
 
-//Cambia el schedule que esta usando el hilo
-pub fn my_thread_chsched(tid: ThreadId, params: SchedulerParams) {
+//Cambia ele shcedule que esta usando el hilo
+pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
     if let Ok(mut runtime) = RUNTIME.lock() {
         if let Some(thread) = runtime.threads.get_mut(&tid) {
-            let (sched, tickets, deadline) = match params {
+            let (sched, tickets, deadline) = match paramns {
                 SchedulerParams::RoundRobin => (SchedulerType::RoundRobin, 1, None),
                 SchedulerParams::Lottery { tickets } => (SchedulerType::Lottery, tickets, None),
                 SchedulerParams::RealTime { deadline } => {
@@ -79,7 +78,7 @@ pub fn my_thread_chsched(tid: ThreadId, params: SchedulerParams) {
 }
 
 pub struct MyMutex {
-    pub internal: SimpleMutex,  // CAMBIADO A PUB para acceso desde bridge
+    internal: SimpleMutex,
 }
 
 //Inicia un mutex
@@ -96,18 +95,18 @@ pub fn my_mutex_lock(mutex: &MyMutex) -> ThreadSignal {
 }
 
 //Liberar un mutex
-pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal {
+pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal{
     let mutex_addr = &mutex.internal as *const _ as usize;
     ThreadSignal::MutexUnlock(mutex_addr)
 }
 
-//Bloquear un mutex sin esperar 
+//Bloquear un utex sin esperar 
 pub fn my_mutex_trylock(mutex: &MyMutex) -> bool {
     api_context::ctx_mutex_trylock(&mutex.internal)
 }
 
-//Destruye un mutex
-pub fn my_mutex_destroy(_mutex: &mut MyMutex) {
+//Destuye un mutex
+pub fn my_mutex_destroy(_mutex: &mut MyMutex){
     //SE SUPONE QUE EN RUST, POR SU SISTEMA DE PROPIEDAD Y DROP, LA MEMORIA SE LIBERA AUTOMATICAMENTE
     //CUANDO LA VARIABLE SALE DEL SCOPE, POR LO QUE ACA NO SE HARIA NADA. 
     //A CHEQUEAR ESO INFO!!!!!!
@@ -115,8 +114,4 @@ pub fn my_mutex_destroy(_mutex: &mut MyMutex) {
 
 pub fn run_simulation(cycles: usize) {
     RUNTIME.lock().unwrap().run(cycles);
-}
-
-pub fn current_time_ms() -> u64 {
-    RUNTIME.lock().unwrap().current_time()
 }

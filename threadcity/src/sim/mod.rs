@@ -1,11 +1,5 @@
 // ciudad y avance de simulacion
 
-mod spawner;    
-mod simulation; 
-
-pub use spawner::{VehicleSpawner, CityLayout};
-pub use simulation::{ThreadCitySimulation, run_threadcity_simulation};
-
 use std::thread;
 use std::time::Duration;
 
@@ -50,6 +44,7 @@ impl City {
     pub fn step(&mut self, dt_ms: u64) {
         self.now_ms = self.now_ms.saturating_add(dt_ms);
         for a in self.agents.iter_mut() {
+            // como AgentDowncast:Agent, podemos llamar step
             a.step(dt_ms as u32);
         }
 
@@ -85,3 +80,4 @@ impl City {
         }
     }
 }
+

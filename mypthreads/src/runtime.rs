@@ -6,6 +6,7 @@ use crate::context_wrapper::ThreadContext;
 use crate::thread::{ContextThreadEntry, MyThread, SchedulerType, ThreadId, ThreadState};
 use crate::thread_data::{ThreadResponse, TransferMessage};
 use std::collections::{HashMap, VecDeque};
+use std::u64;
 use crate::sched;
 
 pub struct ThreadRuntimeV2 {
@@ -67,18 +68,23 @@ impl ThreadRuntimeV2 {
         }
     }
 
+    //Decide que hilo ejecutar a continuacion
+    fn select_next_thread(&mut self) -> Option<ThreadId>{
+                let selected_tid = sched::select_next_thread(&self.ready, &self.threads, self.now_ms);
+
+        if let Some(tid) = selected_tid {
+            self.ready.retain(|&ready_tid| ready_tid != tid);
+        }
+        
+        selected_tid
+    }
     /// ejecuta un quantum - version con contextos
     pub fn run_once(&mut self) {
         self.now_ms += 10;
-        
-        // Usar el scheduler para seleccionar el siguiente hilo
-        let Some(tid) = sched::select_next_thread(&self.ready, &self.threads, self.now_ms) else {
+        let Some(tid) = self.ready.pop_front() else {
             println!("[Runtime] no hay hilos ready");
             return;
         };
-
-        // Remover el hilo seleccionado de la cola de ready
-        self.ready.retain(|&ready_tid| ready_tid != tid);
 
         println!("[Runtime] seleccionado hilo {} para ejecutar", tid);
 
@@ -213,9 +219,5 @@ impl ThreadRuntimeV2 {
                 break;
             }
         }
-    }
-    
-    pub fn current_time(&self) -> u64 {
-        self.now_ms
     }
 }
