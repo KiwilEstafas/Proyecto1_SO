@@ -2,6 +2,7 @@
 
 use super::{Agent, Vehicle};
 use crate::model::Coord;
+use mypthreads::ThreadId;
 
 #[derive(Debug, Clone)]
 pub struct Car {
@@ -9,8 +10,8 @@ pub struct Car {
 }
 
 impl Car {
-    pub fn new(id: u32, origin: (u32, u32), dest: (u32, u32)) -> Self {
-        Self { inner: Vehicle::new(id, Coord::new(origin.0, origin.1), Coord::new(dest.0, dest.1)) }
+    pub fn new(id: u32, tid: ThreadId, origin: (u32, u32), dest: (u32, u32)) -> Self {
+        Self { inner: Vehicle::new(id, tid, Coord::new(origin.0, origin.1), Coord::new(dest.0, dest.1)) }
     }
 }
 

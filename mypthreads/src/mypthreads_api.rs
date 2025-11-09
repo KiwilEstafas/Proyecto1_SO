@@ -1,18 +1,19 @@
+// en mypthreads/src/mypthreads_api.rs
+
 //EL frontend que  llamaria la simulacion de la ciudad
 use crate::api_context;
 use crate::channels::SimpleMutex;
 use crate::runtime::ThreadRuntimeV2;
 use crate::signals::ThreadSignal;
-use crate::thread::{SchedulerType, ThreadId, ThreadState};
+// Importamos la firma de la clausura actualizada
+use crate::thread::{ContextThreadEntry, SchedulerType, ThreadId, ThreadState};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
-use std::sync::atomic::{AtomicU32, Ordering}; //para ID unicos
 
-//Crear la instancia globak del runtime
+//Crear la instancia global del runtime
 pub static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
-pub static NEXT_AGENT_ID: AtomicU32 = AtomicU32::new(301); //Los ID empiezan en 301 por varas, es solo por ejemplo
 
-//Parametros que se necesitan para la creacion de hilos (a futuro podria cambiar)
+//Parametros que se necesitan para la creacion de hilos
 pub enum SchedulerParams {
     RoundRobin,
     Lottery { tickets: u32 },
@@ -22,7 +23,8 @@ pub enum SchedulerParams {
 pub fn my_thread_create(
     name: &str,
     params: SchedulerParams,
-    entry: Box<dyn FnMut(ThreadId) -> ThreadSignal + Send + 'static>,
+    // --- CAMBIO: La firma de la clausura ahora acepta (tid, tickets) ---
+    entry: ContextThreadEntry,
 ) -> ThreadId {
     let mut runtime = RUNTIME.lock().unwrap();
 
@@ -32,6 +34,7 @@ pub fn my_thread_create(
         SchedulerParams::RealTime { deadline } => (SchedulerType::RealTime, 0, Some(deadline)),
     };
 
+    // La función spawn también necesita ser actualizada para aceptar la nueva `entry`
     runtime.spawn(name, sched, entry, tickets, deadline)
 }
 
@@ -49,6 +52,7 @@ pub fn my_thread_end() {
 pub fn my_thread_join(target_tid: ThreadId) -> ThreadSignal {
     ThreadSignal::Join(target_tid)
 }
+
 //Desvincula un hilo, haciendo que sus recursos se liberen al terminar
 pub fn my_thread_detach(tid: ThreadId) {
     if let Ok(mut runtime) = RUNTIME.lock() {
@@ -59,7 +63,7 @@ pub fn my_thread_detach(tid: ThreadId) {
     }
 }
 
-//Cambia ele shcedule que esta usando el hilo
+//Cambia el scheduler que esta usando el hilo
 pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
     if let Ok(mut runtime) = RUNTIME.lock() {
         if let Some(thread) = runtime.threads.get_mut(&tid) {
@@ -74,10 +78,12 @@ pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
             thread.sched_type = sched;
             thread.tickets = tickets;
             thread.deadline = deadline;
-            println!("[API] Planificación del hilo {} actualizada.", tid);
+            println!("[API] Planificación del hilo {} actualizada a {} tiquetes.", tid, tickets);
         }
     }
 }
+
+// --- my_thread_get_tickets HA SIDO ELIMINADA para evitar deadlocks ---
 
 pub struct MyMutex {
     internal: SimpleMutex,
@@ -97,7 +103,7 @@ pub fn my_mutex_lock(mutex: &MyMutex) -> ThreadSignal {
 }
 
 //Liberar un mutex
-pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal{
+pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal {
     let mutex_addr = &mutex.internal as *const _ as usize;
     ThreadSignal::MutexUnlock(mutex_addr)
 }
@@ -108,18 +114,12 @@ pub fn my_mutex_trylock(mutex: &MyMutex) -> bool {
 }
 
 //Destuye un mutex
-pub fn my_mutex_destroy(_mutex: &mut MyMutex){
-    //SE SUPONE QUE EN RUST, POR SU SISTEMA DE PROPIEDAD Y DROP, LA MEMORIA SE LIBERA AUTOMATICAMENTE
-    //CUANDO LA VARIABLE SALE DEL SCOPE, POR LO QUE ACA NO SE HARIA NADA. 
-    //A CHEQUEAR ESO INFO!!!!!!
+pub fn my_mutex_destroy(_mutex: &mut MyMutex) {
+    // En Rust, la memoria se libera automáticamente cuando el objeto sale del scope (RAII).
+    // Esta función se mantiene por compatibilidad con la API de pthreads, pero no necesita hacer nada.
 }
 
-pub fn get_next_agent_id() -> u32 {
-    // Carga el valor actual y lo incrementa en 1 de forma atómica.
-    // Ordering::Relaxed es suficiente para un simple contador.
-    NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed)
-}
-
+// Esta función ya no es necesaria en el `main` pero puede ser útil para pruebas.
 pub fn run_simulation(cycles: usize) {
     RUNTIME.lock().unwrap().run(cycles);
 }

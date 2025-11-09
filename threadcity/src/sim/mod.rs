@@ -1,11 +1,18 @@
 // Sistema de simulacion de ThreadCity
 
+use crate::Vehicle;
 use crate::model::*;
-use std::sync::{Arc, Mutex};
+use crate:: {AgentType, AgentInfo};
 use rand::{rng, seq::IndexedRandom, Rng};
-use crate::AgentType;
+use std::sync::{Arc, Mutex};
+use mypthreads::thread::ThreadId;
+use std::collections::HashMap;
+
+
+
 
 #[derive(Debug, Clone)]
+
 pub struct Spawner {
     pub next_vehicle_spawn_ms: u64,
     pub next_boat_spawn_ms: u64,
@@ -19,6 +26,7 @@ pub struct City {
     pub commerces: Vec<Commerce>,
     pub plants: Vec<NuclearPlant>,
     pub spawner: Spawner,
+    pub agents: HashMap<ThreadId, AgentInfo>,
 }
 
 impl City {
@@ -34,6 +42,7 @@ impl City {
                 next_vehicle_spawn_ms: 1000, //EJEMPLO
                 next_boat_spawn_ms: 5000,    //EJEMPLO
             },
+            agents: HashMap::new(),
         }
     }
 
@@ -92,16 +101,7 @@ impl City {
 
     /// Verifica deadlines de las plantas. Si una falla, imprime un mensaje y la reinicia.
     pub fn check_plant_deadlines(&mut self) {
-        // Ya no necesita devolver un Vec
-
-        // Usamos un bucle `for` normal porque necesitamos modificar `plant`.
         for plant in &mut self.plants {
-            // Si una planta ya explotó en este mismo ciclo de tiempo, no la revisamos de nuevo.
-            // La reiniciaremos y volverá a estar 'Ok' para el próximo ciclo.
-            if plant.status == PlantStatus::Exploded {
-                continue;
-            }
-
             // Hacemos una copia de los requerimientos para evitar problemas de borrowing.
             let requires = plant.requires.clone();
 
@@ -110,29 +110,27 @@ impl City {
                 let deadline = last_delivery + supply.deadline_ms;
                 let fail_time = deadline + plant.deadline_policy.max_lateness_ms;
 
+                //Umbral de riesgo del 80%
+                let risk_threshold = 0.8;
+                let risk_time =
+                    last_delivery + ((deadline - last_delivery) as f64 * risk_threshold) as u64;
                 if self.time_ms > fail_time {
-                    // Cambiamos el estado para registrar la explosión.
                     plant.status = PlantStatus::Exploded;
-
-                    // Imprimimos un mensaje claro sobre el evento.
                     println!(
                     "\n☢️☢️☢️ ¡EXPLOSIÓN! Planta {} falló por falta de {:?} en tiempo {}ms (Límite era: {}ms)",
                     plant.id, supply.kind, self.time_ms, fail_time
                 );
-
-                    // ¡La nueva lógica! Inmediatamente reiniciamos la planta.
                     plant.reset(self.time_ms);
-
-                    // Usamos `break` para salir del bucle de suministros.
-                    // Si la planta explotó por falta de agua, no tiene sentido
-                    // revisar también si falló por material radioactivo en el mismo instante.
-                    // Una vez que explota, explota.
-                    break;
+                    break; //Si explota no necesita revisar los demas suministros de la planta
+                } else if self.time_ms > risk_time && plant.status == PlantStatus::Ok {
+                    plant.status = PlantStatus::AtRisk;
+                    println!(
+                    "\n⚠️⚠️⚠️ ¡ALERTA! Planta {} en riesgo por {:?}. Tiempo: {}ms (Límite: {}ms)",
+                    plant.id, supply.kind, self.time_ms, deadline
+                );
                 }
             }
         }
-
-        // Ya no devolvemos `failures`.
     }
 
     pub fn update_spawner(&mut self) -> Vec<AgentType> {

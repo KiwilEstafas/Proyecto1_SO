@@ -8,7 +8,8 @@ use context::Transfer;
 
 pub type ThreadId = u32;
 
-pub type ContextThreadEntry = Box<dyn FnMut(ThreadId) -> ThreadSignal + Send + 'static>;
+// --- CAMBIO: La clausura ahora acepta (tid, tickets) ---
+pub type ContextThreadEntry = Box<dyn FnMut(ThreadId, u32) -> ThreadSignal + Send + 'static>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
@@ -35,7 +36,7 @@ pub struct MyThread {
     pub deadline: Option<u64>,
     pub detached: bool,
     pub joiners: Vec<ThreadId>,
-    pub join_handle: JoinHandle, //Para saber quienes estan esperando por el hilo
+    pub join_handle: JoinHandle,
     pub context: ThreadContext,
     entry: Option<ContextThreadEntry>,
 }
@@ -66,10 +67,10 @@ impl MyThread {
         }
     }
 
-    /// ejecutar un paso del hilo
-    pub(crate) fn execute_step(&mut self) -> ThreadSignal {
+    /// ejecutar un paso del hilo, pasando los tiquetes actuales
+    pub(crate) fn execute_step(&mut self, current_tickets: u32) -> ThreadSignal {
         if let Some(ref mut entry) = self.entry {
-            entry(self.id)
+            entry(self.id, current_tickets)
         } else {
             ThreadSignal::Exit
         }
@@ -77,51 +78,48 @@ impl MyThread {
 }
 
 /// EL WRAPPER REAL
-/// ejecutamos el hilo y retornamos la respuesta via Transfer
+/// Se ejecuta en la pila del nuevo hilo y maneja la comunicación con el Runtime.
 extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
     // FASE 1: Inicialización
-    let init_msg = unsafe { TransferMessage::unpack(transfer.data) };
-
-    let (thread_ptr, channels, tid) = match init_msg {
-        TransferMessage::Init {
+    // Desempacamos el mensaje inicial que nos envió el Runtime
+    let (thread_ptr, channels, tid, mut current_tickets) =
+        if let TransferMessage::Init {
             thread_ptr,
             channels,
             runtime_context_ptr: _,
-        } => {
+            current_tickets,
+        } = unsafe { TransferMessage::unpack(transfer.data) }
+        {
             let tid = unsafe { (*thread_ptr).id };
-            (thread_ptr, channels, tid)
-        }
-        _ => {
+            (thread_ptr, channels, tid, current_tickets)
+        } else {
             eprintln!("ERROR: thread_entry_wrapper esperaba mensaje Init");
             std::process::abort();
-        }
-    };
+        };
 
-    // Inicializar contexto global
+    // Inicializar contextos para que las APIs funcionen
     ThreadGlobalContext::init(tid, channels.clone());
-
-    // Inicializar API de contexto
     crate::api_context::init_thread_context(tid, channels);
 
     println!("[Hilo {}] inicializado correctamente", tid);
 
     // FASE 2: Loop de Ejecución
     loop {
-        // Ejecutar un paso del hilo
+        // Ejecutar un paso de la lógica del hilo (ej. vehicle_logic)
+        // Pasamos los tiquetes que recibimos del Runtime
         let signal = unsafe {
             let thread = &mut *thread_ptr;
-            thread.execute_step()
+            thread.execute_step(current_tickets)
         };
 
         println!("[Hilo {}] execute_step retornó: {:?}", tid, signal);
 
-        // Convertir señal a respuesta
+        // Convertir la señal del hilo en una respuesta para el Runtime
         let response = match signal {
             ThreadSignal::Yield | ThreadSignal::Continue => {
                 println!("[Hilo {}] preparando yield al runtime", tid);
                 ThreadResponse::Yield
             }
-
             ThreadSignal::Block => {
                 println!("[Hilo {}] preparando block", tid);
                 ThreadResponse::Block
@@ -130,26 +128,36 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
                 println!("[Hilo {}] preparando exit", tid);
                 ThreadResponse::Exit
             }
+            // Las demás señales se pasan directamente
             ThreadSignal::Join(target_tid) => ThreadResponse::Join(target_tid),
             ThreadSignal::MutexLock(mutex_addr) => ThreadResponse::MutexLock(mutex_addr),
             ThreadSignal::MutexUnlock(mutex_addr) => ThreadResponse::MutexUnlock(mutex_addr),
         };
 
-        // Guardar si es Exit antes de mover response
         let is_exit = matches!(response, ThreadResponse::Exit);
-
-        // Retornar al runtime empaquetando la respuesta
         let response_data = response.pack();
 
-        // CLAVE: usamos el contexto que nos pasó el Transfer para retornar
+        // Devolvemos el control (y la respuesta) al Runtime
         transfer = unsafe { transfer.context.resume(response_data) };
 
-        // Cuando volvamos aquí, el runtime nos despertó
+        // --- El hilo se "congela" aquí hasta que el Runtime lo reanude ---
+
+        // Cuando volvemos, el runtime nos ha despertado
         println!("[Hilo {}] despertado por el runtime", tid);
 
-        // Si la respuesta fue Exit, no deberíamos estar aquí
         if is_exit {
             eprintln!("[Hilo {}] ERROR: runtime despertó un hilo terminado", tid);
+            std::process::abort();
+        }
+
+        // El Runtime nos envió un nuevo mensaje con el estado actualizado (incluyendo los tiquetes)
+        // Desempacamos y actualizamos nuestros tiquetes por si cambiaron.
+        if let TransferMessage::Init { current_tickets: new_tickets, .. } =
+            unsafe { TransferMessage::unpack(transfer.data) }
+        {
+            current_tickets = new_tickets;
+        } else {
+            eprintln!("[Hilo {}] ERROR: esperaba mensaje Init al despertar", tid);
             std::process::abort();
         }
     }

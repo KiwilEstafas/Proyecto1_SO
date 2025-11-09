@@ -1,5 +1,6 @@
 use crate::model::Coord;
 use std::any::Any;
+use mypthreads::thread::ThreadId; 
 use crate::model::SupplyKind;
 
 // interfaz base de cualquier agente
@@ -40,6 +41,7 @@ pub enum AgentType {
 #[derive(Debug, Clone)]
 pub struct Vehicle {
     pub id: u32,
+    pub tid: ThreadId,
     pub pos: Coord,
     pub origin: Coord,
     pub destination: Coord,
@@ -48,11 +50,17 @@ pub struct Vehicle {
     pub stage: AgentState
 }
 
+#[derive(Debug, Clone)]
+pub struct AgentInfo {
+    pub vehicle: Vehicle,
+    pub agent_type: AgentType,
+}
 
 impl Vehicle {
-    pub fn new(id: u32, origin: Coord, destination: Coord) -> Self {
+    pub fn new(id: u32, tid: ThreadId, origin: Coord, destination: Coord) -> Self {
         Self {
             id,
+            tid,
             pos: origin,
             origin,
             destination,

@@ -55,8 +55,15 @@ impl NuclearPlant {
     }
 
     pub fn commit_delivery(&mut self, spec: SupplySpec, at_ms: u64) {
+        // Al recibir una entrega, el estado SIEMPRE vuelve a ser 'Ok'.
+        if self.status == PlantStatus::AtRisk {
+            println!(
+                "✅ Planta {} ha sido reabastecida y ya no está en riesgo.",
+                self.id
+            );
+        }
         self.last_delivery_ms.insert(spec.kind, at_ms);
-        self.status = PlantStatus::Ok
+        self.status = PlantStatus::Ok;
     }
 
     pub fn get_last_delivery_time(&self, kind: &SupplyKind) -> u64 {

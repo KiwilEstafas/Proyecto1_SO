@@ -112,6 +112,7 @@ impl ThreadRuntimeV2 {
 
         // obtener el hilo
         let thread = self.threads.get_mut(&tid).expect("hilo debe existir");
+        let current_tickets = thread.tickets;
         thread.state = ThreadState::Running;
 
         // preparar mensaje inicial
@@ -122,6 +123,7 @@ impl ThreadRuntimeV2 {
             thread_ptr,
             channels: self.channels.clone(),
             runtime_context_ptr: runtime_ctx_ptr as usize,
+            current_tickets,
         };
 
         // hacer resume al hilo

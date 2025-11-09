@@ -11,6 +11,7 @@ pub enum TransferMessage {
         thread_ptr: *mut MyThread,
         channels: ThreadChannels,
         runtime_context_ptr: usize,
+        current_tickets: u32, 
     },
     /// mensaje de continuacion: el runtime dice "continua ejecutando"
     Continue,
