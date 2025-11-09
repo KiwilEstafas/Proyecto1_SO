@@ -1,5 +1,3 @@
-// ThreadCity - Simulación con hilos preemptivos usando mypthreads
-
 use mypthreads::mypthreads_api::get_next_agent_id;
 use mypthreads::mypthreads_api::RUNTIME;
 use mypthreads::mypthreads_api::*;

@@ -7,7 +7,7 @@ use rand::Rng;
 /// SCHEDULER DE TIEMPO REAL: Encuentra el hilo listo con el deadline más cercano.
 fn schedule_real_time<'a>(
     ready_queue: &'a VecDeque<ThreadId>,
-    threads: &'a HashMap<ThreadId, MyThread>
+    threads: &HashMap<ThreadId, Box<MyThread>>
 ) -> Option<ThreadId> {
     ready_queue.iter()
         .filter_map(|&tid| {
@@ -25,7 +25,7 @@ fn schedule_real_time<'a>(
 /// SCHEDULER DE SORTEO: Elige un ganador basado en tiquetes entre los hilos que no son de tiempo real.
 fn schedule_lottery<'a>(
     ready_queue: &'a VecDeque<ThreadId>,
-    threads: &'a HashMap<ThreadId, MyThread>
+    threads: &HashMap<ThreadId, Box<MyThread>>
 ) -> Option<ThreadId> {
     
     // Filtramos solo los candidatos para sorteo (Lottery y RoundRobin).
@@ -63,7 +63,7 @@ fn schedule_lottery<'a>(
 /// SCHEDULER ROUND ROBIN: Simplemente toma el primer hilo que no sea de tiempo real.
 fn schedule_round_robin<'a>(
     ready_queue: &'a VecDeque<ThreadId>,
-    threads: &'a HashMap<ThreadId, MyThread>
+    threads: &HashMap<ThreadId, Box<MyThread>>
 ) -> Option<ThreadId> {
     ready_queue.iter()
         .find(|&&tid| threads.get(&tid).map_or(false, |t| t.sched_type != SchedulerType::RealTime))
@@ -74,7 +74,7 @@ fn schedule_round_robin<'a>(
 /// La función principal que maneja los schedulers según su prioridad.
 pub fn select_next_thread(
     ready_queue: &VecDeque<ThreadId>,
-    threads: &HashMap<ThreadId, MyThread>,
+    threads: &HashMap<ThreadId, Box<MyThread>>,
     now_ms: u64,
 ) -> Option<ThreadId> {
     

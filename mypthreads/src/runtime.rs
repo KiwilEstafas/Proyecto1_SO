@@ -13,7 +13,7 @@ use std::u64;
 pub struct ThreadRuntimeV2 {
     now_ms: u64,
     next_tid: ThreadId,
-    pub threads: HashMap<ThreadId, MyThread>,
+    pub threads: HashMap<ThreadId, Box<MyThread>>,
     pub ready: VecDeque<ThreadId>,
     pub blocked: Vec<ThreadId>,
     pub runtime_context: ThreadContext,
@@ -47,7 +47,7 @@ impl ThreadRuntimeV2 {
 
         let thread = MyThread::new(tid, name.into(), sched, tickets, deadline, entry);
 
-        self.threads.insert(tid, thread);
+        self.threads.insert(tid, Box::new(thread));
         self.ready.push_back(tid);
 
         println!(
@@ -115,7 +115,7 @@ impl ThreadRuntimeV2 {
         thread.state = ThreadState::Running;
 
         // preparar mensaje inicial
-        let thread_ptr = thread as *mut MyThread;
+        let thread_ptr = &mut **thread as *mut MyThread;
         let runtime_ctx_ptr = &mut self.runtime_context as *mut ThreadContext;
 
         let init_msg = TransferMessage::Init {
