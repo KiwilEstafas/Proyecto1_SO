@@ -1,11 +1,13 @@
 // ThreadCity - Simulación con hilos preemptivos usando mypthreads
 
-use threadcity::*;
+use mypthreads::mypthreads_api::RUNTIME;
 use mypthreads::mypthreads_api::*;
+use mypthreads::runtime::ThreadRuntimeV2;
 use mypthreads::signals::ThreadSignal;
 use mypthreads::thread::ThreadId;
-use std::sync::{Arc, Mutex};
 use rand::Rng;
+use std::sync::{Arc, Mutex};
+use threadcity::*;
 
 /// Estado de un agente (vehículo/barco) en la simulación
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -29,59 +31,133 @@ fn main() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║           ThreadCity - Simulación Preemptiva              ║");
     println!("╚════════════════════════════════════════════════════════════╝\n");
-    
+
     // Crear ciudad
     let (city, layout) = create_city();
     let shared_city = create_shared_city(city);
-    
+
     // Contadores de agentes creados
     let cars_created = Arc::new(Mutex::new(0u32));
     let ambulances_created = Arc::new(Mutex::new(0u32));
     let boats_created = Arc::new(Mutex::new(0u32));
     let trucks_created = Arc::new(Mutex::new(0u32));
-    
+
     println!("Iniciando simulación...\n");
-    
+
     // Crear algunos carros
     for i in 0..5 {
         spawn_car(i + 1, &layout, &shared_city);
         *cars_created.lock().unwrap() += 1;
     }
-    
+
     // Crear ambulancias
     for i in 0..2 {
         spawn_ambulance(i + 100, &layout, &shared_city);
         *ambulances_created.lock().unwrap() += 1;
     }
-    
+
     // Crear camiones de carga para las plantas
-    spawn_cargo_truck(200, SupplyKind::Radioactive, (0, 0), (1, 0), &layout, &shared_city);
-    spawn_cargo_truck(201, SupplyKind::Water, (0, 0), (1, 0), &layout, &shared_city);
-    spawn_cargo_truck(202, SupplyKind::Radioactive, (0, 4), (2, 4), &layout, &shared_city);
-    spawn_cargo_truck(203, SupplyKind::Water, (0, 4), (2, 4), &layout, &shared_city);
+    spawn_cargo_truck(
+        200,
+        SupplyKind::Radioactive,
+        (0, 0),
+        (1, 0),
+        &layout,
+        &shared_city,
+    );
+    spawn_cargo_truck(
+        201,
+        SupplyKind::Water,
+        (0, 0),
+        (1, 0),
+        &layout,
+        &shared_city,
+    );
+    spawn_cargo_truck(
+        202,
+        SupplyKind::Radioactive,
+        (0, 4),
+        (2, 4),
+        &layout,
+        &shared_city,
+    );
+    spawn_cargo_truck(
+        203,
+        SupplyKind::Water,
+        (0, 4),
+        (2, 4),
+        &layout,
+        &shared_city,
+    );
     *trucks_created.lock().unwrap() = 4;
-    
+
     // Crear un barco
     spawn_boat(300, &layout, &shared_city);
     *boats_created.lock().unwrap() += 1;
-    
+
     println!("Agentes creados:");
     println!("  🚗 Carros: {}", *cars_created.lock().unwrap());
     println!("  🚑 Ambulancias: {}", *ambulances_created.lock().unwrap());
     println!("  🚚 Camiones: {}", *trucks_created.lock().unwrap());
     println!("  ⛵ Barcos: {}", *boats_created.lock().unwrap());
     println!();
-    
+
     // Ejecutar simulación
-    const CYCLES: usize = 200;
-    run_simulation(CYCLES);
-    
+    const SIMULATION_STEPS: u32 = 200; // ¿Cuántos "pasos" durará la simulación?
+    const TIME_PER_STEP_MS: u64 = 500; // ¿Cuántos milisegundos del "mundo" avanzan en cada paso?
+    const SCHEDULER_CYCLES_PER_STEP: usize = 10; // ¿Cuántos ciclos de CPU damos a los hilos en cada paso?
+    println!(
+        "Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n",
+        SIMULATION_STEPS, TIME_PER_STEP_MS
+    );
+
+    for step in 0..SIMULATION_STEPS {
+        // --- Parte A: Actualizar el estado del MUNDO ---
+        {
+            // Usamos un bloque para que el Mutex se libere lo antes posible
+            let mut city_lock = shared_city.lock().unwrap();
+
+            // 1. Avanzar el reloj global de la ciudad
+            city_lock.update(TIME_PER_STEP_MS);
+
+            // 2. Revisar si alguna planta explotó con el nuevo tiempo
+            let failures = city_lock.check_plant_deadlines();
+            if !failures.is_empty() {
+                println!("☢️  ¡UNA PLANTA HA EXPLOTADO! Finalizando simulación.");
+                break; // Termina el bucle principal si hay una explosión
+            }
+
+            // Imprimimos el estado actual para poder depurar
+            println!(
+                "\n--- [Paso de Simulación {} | Tiempo Mundial: {}ms] ---",
+                step,
+                city_lock.current_time()
+            );
+        } // El Mutex de la ciudad se libera aquí, permitiendo que los hilos accedan a ella.
+
+        // --- Parte B: Permitir que los AGENTES actúen ---
+
+        // 3. Desbloquear a todos los hilos que estaban esperando
+        //    (Necesitarás añadir esta función a tu Runtime, ver explicación más abajo)
+        // RUNTIME.lock().unwrap().unblock_all_threads();
+
+        // 4. Ejecutar el planificador de hilos por unos cuantos ciclos
+        //    Esto les da a los carros, barcos, etc., la oportunidad de moverse y reaccionar.
+        RUNTIME.lock().unwrap().unblock_all_threads();
+        RUNTIME.lock().unwrap().run(SCHEDULER_CYCLES_PER_STEP);
+
+        // Opcional: una pequeña pausa real para que la salida en consola no sea abrumadora
+        std::thread::sleep(std::time::Duration::from_millis(50));
+    }
+
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║              Simulación Finalizada                        ║");
     println!("╠════════════════════════════════════════════════════════════╣");
-    println!("║ Ciclos: {:>51} ║", CYCLES);
     println!("║ Carros: {:>51} ║", *cars_created.lock().unwrap());
-    println!("║ Ambulancias: {:>47} ║", *ambulances_created.lock().unwrap());
+    println!(
+        "║ Ambulancias: {:>47} ║",
+        *ambulances_created.lock().unwrap()
+    );
     println!("║ Camiones: {:>49} ║", *trucks_created.lock().unwrap());
     println!("║ Barcos: {:>51} ║", *boats_created.lock().unwrap());
     println!("╚════════════════════════════════════════════════════════════╝\n");
@@ -90,20 +166,20 @@ fn main() {
 /// Crea un carro normal
 fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity) {
     let mut rng = rand::rng();
-    
+
     // Origen y destino aleatorios (evitando columna del río)
     let origin = random_position(&mut rng, layout);
     let dest = random_destination(&mut rng, layout, origin);
-    
+
     let city_clone = Arc::clone(city);
     let layout_clone = layout.clone();
-    
+
     let mut pos = origin;
     let mut state = AgentState::Moving;
     let mut crossing_steps = 0u32;
-    
+
     println!("🚗 Carro-{} creado: {:?} -> {:?}", id, origin, dest);
-    
+
     my_thread_create(
         &format!("Car-{}", id),
         SchedulerParams::Lottery { tickets: 10 },
@@ -126,19 +202,19 @@ fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity) {
 /// Crea una ambulancia (prioridad alta)
 fn spawn_ambulance(id: u32, layout: &CityLayout, city: &SharedCity) {
     let mut rng = rand::rng();
-    
+
     let origin = random_position(&mut rng, layout);
     let dest = random_destination(&mut rng, layout, origin);
-    
+
     let city_clone = Arc::clone(city);
     let layout_clone = layout.clone();
-    
+
     let mut pos = origin;
     let mut state = AgentState::Moving;
     let mut crossing_steps = 0u32;
-    
+
     println!("🚑 Ambulancia-{} creada: {:?} -> {:?}", id, origin, dest);
-    
+
     my_thread_create(
         &format!("Ambulance-{}", id),
         SchedulerParams::Lottery { tickets: 100 }, // Más tickets = más prioridad
@@ -169,29 +245,35 @@ fn spawn_cargo_truck(
 ) {
     let city_clone = Arc::clone(city);
     let layout_clone = layout.clone();
-    
+
     let mut pos = Coord::new(origin.0, origin.1);
     let destination = Coord::new(dest.0, dest.1);
     let mut state = AgentState::Moving;
     let mut crossing_steps = 0u32;
-    
+
     // Calcular deadline basado en la planta
     let deadline = {
         let city_lock = city.lock().unwrap();
-        let plant = city_lock.plants.iter()
+        let plant = city_lock
+            .plants
+            .iter()
             .find(|p| p.loc.x == destination.x && p.loc.y == destination.y)
             .expect("Planta no encontrada");
-        
-        let supply = plant.requires.iter()
+
+        let supply = plant
+            .requires
+            .iter()
             .find(|s| s.kind == cargo)
             .expect("Suministro no requerido");
-        
+
         city_lock.current_time() + supply.deadline_ms
     };
-    
-    println!("🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms", 
-             id, cargo, origin, dest, deadline);
-    
+
+    println!(
+        "🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms",
+        id, cargo, origin, dest, deadline
+    );
+
     my_thread_create(
         &format!("Truck-{}", id),
         SchedulerParams::RealTime { deadline },
@@ -215,17 +297,17 @@ fn spawn_cargo_truck(
 fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity) {
     let city_clone = Arc::clone(city);
     let layout_clone = layout.clone();
-    
+
     // Los barcos navegan verticalmente en el río
     let origin = Coord::new(layout.bridge1_row, layout.river_column);
     let dest = Coord::new(layout.bridge3_row + 1, layout.river_column);
-    
+
     let mut pos = origin;
     let mut state = AgentState::Moving;
     let mut crossing_steps = 0u32;
-    
+
     println!("⛵ Barco-{} creado: {:?} -> {:?}", id, origin, dest);
-    
+
     my_thread_create(
         &format!("Boat-{}", id),
         SchedulerParams::RoundRobin,
@@ -264,42 +346,44 @@ fn vehicle_logic(
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
-            
+
             // Verificar si necesita cruzar el río
-            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column) ||
-                               (pos.y > layout.river_column && dest.y < layout.river_column);
-            
-            let at_bridge_entrance = 
-                (pos.y == layout.river_column - 1 && dest.y > layout.river_column) ||
-                (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
-            
+            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
+                || (pos.y > layout.river_column && dest.y < layout.river_column);
+
+            let at_bridge_entrance = (pos.y == layout.river_column - 1
+                && dest.y > layout.river_column)
+                || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
+
             if needs_bridge && at_bridge_entrance {
                 println!("[{}] 🚦 En entrada de puente", id);
                 *state = AgentState::WaitingForBridge;
                 return ThreadSignal::Yield;
             }
-            
+
             // Moverse hacia el destino
             move_towards(pos, dest, layout);
             ThreadSignal::Yield
         }
-        
+
         AgentState::WaitingForBridge => {
             let city_lock = city.lock().unwrap();
             let bridge_id = nearest_bridge(layout, pos.x);
-            let bridge = city_lock.get_bridge(bridge_id).expect("Puente no encontrado");
-            
+            let bridge = city_lock
+                .get_bridge(bridge_id)
+                .expect("Puente no encontrado");
+
             let priority = match agent_type {
                 AgentType::Ambulance => 10,
                 _ => 0,
             };
-            
+
             let direction = if pos.y < layout.river_column {
                 TrafficDirection::NorthToSouth
             } else {
                 TrafficDirection::SouthToNorth
             };
-            
+
             // Ambulancias pasan sin esperar
             if agent_type == AgentType::Ambulance {
                 println!("[{}] 🚑 AMBULANCIA pasando directamente", id);
@@ -308,7 +392,7 @@ fn vehicle_logic(
                 drop(city_lock);
                 return ThreadSignal::Yield;
             }
-            
+
             if bridge.try_cross(tid, priority, direction) {
                 println!("[{}] Comenzó a cruzar puente {}", id, bridge_id);
                 *state = AgentState::CrossingBridge;
@@ -320,10 +404,10 @@ fn vehicle_logic(
                 ThreadSignal::Block
             }
         }
-        
+
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
-            
+
             if *crossing_steps >= 3 {
                 // Terminar de cruzar
                 if pos.y < layout.river_column {
@@ -331,24 +415,26 @@ fn vehicle_logic(
                 } else {
                     pos.y = layout.river_column - 1;
                 }
-                
+
                 let city_lock = city.lock().unwrap();
                 let bridge_id = nearest_bridge(layout, pos.x);
-                let bridge = city_lock.get_bridge(bridge_id).expect("Puente no encontrado");
-                
+                let bridge = city_lock
+                    .get_bridge(bridge_id)
+                    .expect("Puente no encontrado");
+
                 if agent_type != AgentType::Ambulance {
                     bridge.exit_bridge(tid);
                 }
-                
+
                 drop(city_lock);
-                
+
                 println!("[{}] Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Moving;
             }
-            
+
             ThreadSignal::Yield
         }
-        
+
         AgentState::Arrived => ThreadSignal::Exit,
     }
 }
@@ -372,37 +458,42 @@ fn cargo_truck_logic(
                 let mut city_lock = city.lock().unwrap();
                 let current_time = city_lock.current_time(); // Guardar el tiempo PRIMERO
                 if let Some(plant) = city_lock.find_plant_at(dest) {
-                    let supply = plant.requires.iter()
+                    let supply = plant
+                        .requires
+                        .iter()
                         .find(|s| s.kind == cargo)
                         .expect("Suministro no requerido")
                         .clone();
-                    
+
                     plant.commit_delivery(supply, current_time); // Usar la variable guardada
-                    println!("[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}", id, cargo, dest);
+                    println!(
+                        "[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}",
+                        id, cargo, dest
+                    );
                 }
                 drop(city_lock);
-                
+
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
-            
+
             // Similar a vehículos normales
-            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column) ||
-                               (pos.y > layout.river_column && dest.y < layout.river_column);
-            
-            let at_bridge_entrance = 
-                (pos.y == layout.river_column - 1 && dest.y > layout.river_column) ||
-                (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
-            
+            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
+                || (pos.y > layout.river_column && dest.y < layout.river_column);
+
+            let at_bridge_entrance = (pos.y == layout.river_column - 1
+                && dest.y > layout.river_column)
+                || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
+
             if needs_bridge && at_bridge_entrance {
                 *state = AgentState::WaitingForBridge;
                 return ThreadSignal::Yield;
             }
-            
+
             move_towards(pos, dest, layout);
             ThreadSignal::Yield
         }
-        
+
         AgentState::WaitingForBridge | AgentState::CrossingBridge => {
             // Usar la misma lógica que vehículos normales
             vehicle_logic(
@@ -417,7 +508,7 @@ fn cargo_truck_logic(
                 layout,
             )
         }
-        
+
         AgentState::Arrived => ThreadSignal::Exit,
     }
 }
@@ -440,25 +531,25 @@ fn boat_logic(
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
-            
+
             // Verificar si está en el puente 3
             if pos.x == layout.bridge3_row {
                 *state = AgentState::WaitingForBridge;
                 return ThreadSignal::Yield;
             }
-            
+
             // Moverse verticalmente en el río
             if pos.x < dest.x {
                 pos.x += 1;
             }
-            
+
             ThreadSignal::Yield
         }
-        
+
         AgentState::WaitingForBridge => {
             let city_lock = city.lock().unwrap();
             let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
-            
+
             if bridge.boat_request_pass() {
                 println!("[Boat-{}] ⛵ Puente levadizo levantado, pasando", id);
                 *state = AgentState::CrossingBridge;
@@ -470,24 +561,24 @@ fn boat_logic(
                 ThreadSignal::Block
             }
         }
-        
+
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
-            
+
             if *crossing_steps >= 5 {
                 let city_lock = city.lock().unwrap();
                 let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
                 bridge.boat_exit();
                 drop(city_lock);
-                
+
                 pos.x += 1;
                 println!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Moving;
             }
-            
+
             ThreadSignal::Yield
         }
-        
+
         AgentState::Arrived => ThreadSignal::Exit,
     }
 }
@@ -504,7 +595,7 @@ fn move_towards(pos: &mut Coord, dest: Coord, layout: &CityLayout) {
             return;
         }
     }
-    
+
     // Mover verticalmente
     if pos.x < dest.x {
         pos.x += 1;

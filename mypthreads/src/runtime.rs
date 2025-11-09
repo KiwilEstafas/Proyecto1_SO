@@ -1,13 +1,14 @@
 //! runtime v2 que usa cambio de contexto real
 
-use crate::SimpleMutex;
 use crate::channels::ThreadChannels;
 use crate::context_wrapper::ThreadContext;
+use crate::sched;
 use crate::thread::{ContextThreadEntry, MyThread, SchedulerType, ThreadId, ThreadState};
 use crate::thread_data::{ThreadResponse, TransferMessage};
+use crate::SimpleMutex;
 use std::collections::{HashMap, VecDeque};
 use std::u64;
-use crate::sched;
+
 
 pub struct ThreadRuntimeV2 {
     now_ms: u64,
@@ -69,15 +70,36 @@ impl ThreadRuntimeV2 {
     }
 
     //Decide que hilo ejecutar a continuacion
-    fn select_next_thread(&mut self) -> Option<ThreadId>{
-                let selected_tid = sched::select_next_thread(&self.ready, &self.threads, self.now_ms);
+    fn select_next_thread(&mut self) -> Option<ThreadId> {
+        let selected_tid = sched::select_next_thread(&self.ready, &self.threads, self.now_ms);
 
         if let Some(tid) = selected_tid {
             self.ready.retain(|&ready_tid| ready_tid != tid);
         }
-        
+
         selected_tid
     }
+
+    /// Mueve TODOS los hilos de la cola de bloqueados a la cola de listos.
+    /// Esto es útil al inicio de un nuevo paso de simulación para darles a los
+    /// hilos la oportunidad de reintentar la acción por la que se bloquearon.
+    pub fn unblock_all_threads(&mut self) {
+        // Tomamos todos los hilos bloqueados y los movemos a la cola de listos.
+        // .drain(..) es eficiente porque vacía el vector `blocked` sin necesidad
+        // de reasignar memoria.
+        for tid in self.blocked.drain(..) {
+            if let Some(thread) = self.threads.get_mut(&tid) {
+                thread.state = ThreadState::Ready;
+                self.ready.push_back(tid);
+                println!(
+                    "[Runtime] Hilo {} desbloqueado por el ciclo de simulación.",
+                    tid
+                );
+            }
+        }
+        // Después de esto, self.blocked estará vacío.
+    }
+
     /// ejecuta un quantum - version con contextos
     pub fn run_once(&mut self) {
         self.now_ms += 10;

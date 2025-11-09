@@ -8,7 +8,7 @@ use once_cell::sync::Lazy;
 use std::sync::Mutex;
 
 //Crear la instancia globak del runtime
-static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
+pub static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
 
 //Parametros que se necesitan para la creacion de hilos (a futuro podria cambiar)
 pub enum SchedulerParams {

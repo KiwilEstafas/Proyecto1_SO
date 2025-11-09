@@ -784,6 +784,7 @@ dependencies = [
  "glib",
  "gtk",
  "mypthreads",
+ "rand",
  "threadcity",
 ]
 
