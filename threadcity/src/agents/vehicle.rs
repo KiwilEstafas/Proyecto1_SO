@@ -1,5 +1,6 @@
 use crate::model::Coord;
 use std::any::Any;
+use crate::model::SupplyKind;
 
 // interfaz base de cualquier agente
 pub trait Agent {
@@ -27,6 +28,13 @@ pub enum AgentState {
     WaitingForBridge,
     CrossingBridge,
     Arrived,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AgentType {
+    Car,
+    Ambulance,
+    Boat,
+    CargoTruck(SupplyKind),
 }
 
 #[derive(Debug, Clone)]

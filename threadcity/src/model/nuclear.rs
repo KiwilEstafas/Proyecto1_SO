@@ -1,9 +1,12 @@
 // planta nuclear y logistica de suministros
+use crate::Coord;
 use std::collections::HashMap;
-use crate::{Coord};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub enum SupplyKind { Radioactive, Water }
+pub enum SupplyKind {
+    Radioactive,
+    Water,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct SupplySpec {
@@ -18,7 +21,11 @@ pub struct DeadlinePolicy {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PlantStatus { Ok, AtRisk, Exploded }
+pub enum PlantStatus {
+    Ok,
+    AtRisk,
+    Exploded,
+}
 
 #[derive(Debug, Clone)]
 pub struct NuclearPlant {
@@ -27,15 +34,20 @@ pub struct NuclearPlant {
     pub loc: Coord,
     pub requires: Vec<SupplySpec>,
     pub deadline_policy: DeadlinePolicy,
-    last_delivery_ms: HashMap<SupplyKind,u64>,
+    last_delivery_ms: HashMap<SupplyKind, u64>,
 }
 
 impl NuclearPlant {
-    pub fn new(id: u32, loc: Coord, requires: Vec<SupplySpec>, deadline_policy: DeadlinePolicy) -> Self {
+    pub fn new(
+        id: u32,
+        loc: Coord,
+        requires: Vec<SupplySpec>,
+        deadline_policy: DeadlinePolicy,
+    ) -> Self {
         Self {
             id,
             status: PlantStatus::Ok,
-            loc, 
+            loc,
             requires,
             deadline_policy,
             last_delivery_ms: HashMap::new(),
@@ -47,8 +59,21 @@ impl NuclearPlant {
         self.status = PlantStatus::Ok
     }
 
-    pub fn get_last_delivery_time(&self, kind:&SupplyKind) -> u64 {
+    pub fn get_last_delivery_time(&self, kind: &SupplyKind) -> u64 {
         *self.last_delivery_ms.get(kind).unwrap_or(&0)
     }
-}
 
+    pub fn reset(&mut self, current_time: u64) {
+        println!(
+            "☢️  Planta {} reiniciándose después de la explosión en tiempo {}ms.",
+            self.id, current_time
+        );
+        self.status = PlantStatus::Ok;
+        // Reinicia los contadores de entrega usando el tiempo actual como punto de partida.
+        // Esto le da a la planta un ciclo completo antes de volver a estar en riesgo.
+        self.last_delivery_ms
+            .insert(SupplyKind::Radioactive, current_time);
+        self.last_delivery_ms
+            .insert(SupplyKind::Water, current_time);
+    }
+}

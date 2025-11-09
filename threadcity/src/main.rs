@@ -1,5 +1,6 @@
 // ThreadCity - Simulación con hilos preemptivos usando mypthreads
 
+use mypthreads::mypthreads_api::get_next_agent_id;
 use mypthreads::mypthreads_api::RUNTIME;
 use mypthreads::mypthreads_api::*;
 use mypthreads::runtime::ThreadRuntimeV2;
@@ -16,15 +17,6 @@ enum AgentState {
     WaitingForBridge,
     CrossingBridge,
     Arrived,
-}
-
-/// Tipo de agente
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum AgentType {
-    Car,
-    Ambulance,
-    Boat,
-    CargoTruck(SupplyKind),
 }
 
 fn main() {
@@ -77,43 +69,57 @@ fn main() {
     println!();
 
     // Ejecutar simulación
-    const SIMULATION_STEPS: u32 = 200; // ¿Cuántos "pasos" durará la simulación?
+    const SIMULATION_STEPS: u32 = 50; // ¿Cuántos "pasos" durará la simulación?
     const TIME_PER_STEP_MS: u64 = 500; // ¿Cuántos milisegundos del "mundo" avanzan en cada paso?
-    const SCHEDULER_CYCLES_PER_STEP: usize = 10; // ¿Cuántos ciclos de CPU damos a los hilos en cada paso?
+    const SCHEDULER_CYCLES_PER_STEP: usize = 2; // ¿Cuántos ciclos de CPU damos a los hilos en cada paso?
     println!(
         "Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n",
         SIMULATION_STEPS, TIME_PER_STEP_MS
     );
 
     for step in 0..SIMULATION_STEPS {
-        // --- Parte A: Actualizar el estado del MUNDO ---
-        {
-            // Usamos un bloque para que el Mutex se libere lo antes posible
+        let new_agents = {
             let mut city_lock = shared_city.lock().unwrap();
 
-            // 1. Avanzar el reloj global de la ciudad
+            // 1. PRIMERO, AVANZA EL TIEMPO. Esta es la línea que faltaba.
             city_lock.update(TIME_PER_STEP_MS);
 
-            // 2. Revisar si alguna planta explotó con el nuevo tiempo
-            let failures = city_lock.check_plant_deadlines();
-            if !failures.is_empty() {
-                println!("☢️  ¡UNA PLANTA HA EXPLOTADO! Finalizando simulación.");
-                break; // Termina el bucle principal si hay una explosión
-            }
+            // 2. LUEGO, revisa los deadlines con el nuevo tiempo.
+            city_lock.check_plant_deadlines();
 
-            // Imprimimos el estado actual para poder depurar
             println!(
                 "\n--- [Paso de Simulación {} | Tiempo Mundial: {}ms] ---",
                 step,
                 city_lock.current_time()
             );
-        } // El Mutex de la ciudad se libera aquí, permitiendo que los hilos accedan a ella.
 
-        // --- Parte B: Permitir que los AGENTES actúen ---
+            // 3. FINALMENTE, ejecuta el spawner con el nuevo tiempo.
+            city_lock.update_spawner()
+        }; // El lock se libera, pero 'new_agents' ahora contiene el vector
 
-        // 3. Desbloquear a todos los hilos que estaban esperando
-        //    (Necesitarás añadir esta función a tu Runtime, ver explicación más abajo)
-        // RUNTIME.lock().unwrap().unblock_all_threads();
+        // Ahora 'new_agents' SÍ existe aquí y el bucle puede usarlo
+        for agent_type in new_agents {
+            let new_id = get_next_agent_id();
+
+            match agent_type {
+                AgentType::Car => {
+                    println!("[Spawner] Creando nuevo Carro con ID {}", new_id);
+                    spawn_car(new_id, &layout, &shared_city);
+                }
+                AgentType::Ambulance => {
+                    println!("[Spawner] Creando nueva Ambulancia con ID {}", new_id);
+                    spawn_ambulance(new_id, &layout, &shared_city);
+                }
+                AgentType::Boat => {
+                    println!("[Spawner] Creando nuevo Barco con ID {}", new_id);
+                    spawn_boat(new_id, &layout, &shared_city);
+                }
+                AgentType::CargoTruck(_) => {
+                    // Opcional: También podrías generar camiones aquí si lo deseas.
+                    // Por ahora, lo dejamos fuera para mantener el reabastecimiento manual.
+                }
+            }
+        }
 
         // 4. Ejecutar el planificador de hilos por unos cuantos ciclos
         //    Esto les da a los carros, barcos, etc., la oportunidad de moverse y reaccionar.

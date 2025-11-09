@@ -6,9 +6,11 @@ use crate::signals::ThreadSignal;
 use crate::thread::{SchedulerType, ThreadId, ThreadState};
 use once_cell::sync::Lazy;
 use std::sync::Mutex;
+use std::sync::atomic::{AtomicU32, Ordering}; //para ID unicos
 
 //Crear la instancia globak del runtime
 pub static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
+pub static NEXT_AGENT_ID: AtomicU32 = AtomicU32::new(301); //Los ID empiezan en 301 por varas, es solo por ejemplo
 
 //Parametros que se necesitan para la creacion de hilos (a futuro podria cambiar)
 pub enum SchedulerParams {
@@ -110,6 +112,12 @@ pub fn my_mutex_destroy(_mutex: &mut MyMutex){
     //SE SUPONE QUE EN RUST, POR SU SISTEMA DE PROPIEDAD Y DROP, LA MEMORIA SE LIBERA AUTOMATICAMENTE
     //CUANDO LA VARIABLE SALE DEL SCOPE, POR LO QUE ACA NO SE HARIA NADA. 
     //A CHEQUEAR ESO INFO!!!!!!
+}
+
+pub fn get_next_agent_id() -> u32 {
+    // Carga el valor actual y lo incrementa en 1 de forma atómica.
+    // Ordering::Relaxed es suficiente para un simple contador.
+    NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 pub fn run_simulation(cycles: usize) {
