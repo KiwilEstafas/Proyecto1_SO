@@ -1,10 +1,11 @@
+// threadcity/src/model/bridge.rs
 // Puentes con diferentes reglas de tráfico
+// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
 
-use mypthreads::channels::SimpleMutex;
 use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
-use std::collections::VecDeque;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+use crate::sync::{SharedMutex, Shared};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
@@ -61,14 +62,11 @@ pub struct Bridge {
     pub row: u32,
     pub capacity: u32,
 
-    // Estado protegido
-    state: Arc<Mutex<BridgeState>>,
+    // Estado protegido - CAMBIO: Ahora usa SharedMutex en lugar de std::sync::Mutex
+    state: Shared<BridgeState>,
 
-    // Mutex para sincronización de hilos
-    access_mutex: SimpleMutex,
-
-    // Cola de espera con prioridades
-    wait_queue: Arc<Mutex<BinaryHeap<WaitingVehicle>>>,
+    // Cola de espera con prioridades - CAMBIO: Ahora usa SharedMutex
+    wait_queue: Shared<BinaryHeap<WaitingVehicle>>,
 
     // Configuración específica
     light_cycle_ms: u64,
@@ -83,15 +81,14 @@ impl Bridge {
             bridge_type: BridgeType::TrafficLight,
             row,
             capacity: 1,
-            state: Arc::new(Mutex::new(BridgeState {
+            state: crate::sync::shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
-            })),
-            access_mutex: SimpleMutex::new(),
-            wait_queue: Arc::new(Mutex::new(BinaryHeap::new())),
+            }),
+            wait_queue: crate::sync::shared(BinaryHeap::new()),
             light_cycle_ms: cycle_ms,
             priority_direction: TrafficDirection::NorthToSouth,
         }
@@ -104,15 +101,14 @@ impl Bridge {
             bridge_type: BridgeType::Yield,
             row,
             capacity: 1,
-            state: Arc::new(Mutex::new(BridgeState {
+            state: crate::sync::shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
-            })),
-            access_mutex: SimpleMutex::new(),
-            wait_queue: Arc::new(Mutex::new(BinaryHeap::new())),
+            }),
+            wait_queue: crate::sync::shared(BinaryHeap::new()),
             light_cycle_ms: 0,
             priority_direction: priority_dir,
         }
@@ -125,76 +121,83 @@ impl Bridge {
             bridge_type: BridgeType::Drawbridge,
             row,
             capacity: 2,
-            state: Arc::new(Mutex::new(BridgeState {
+            state: crate::sync::shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
-            })),
-            access_mutex: SimpleMutex::new(),
-            wait_queue: Arc::new(Mutex::new(BinaryHeap::new())),
+            }),
+            wait_queue: crate::sync::shared(BinaryHeap::new()),
             light_cycle_ms: 0,
             priority_direction: TrafficDirection::NorthToSouth,
         }
     }
 
     /// Actualizar el estado del puente (para semáforos)
+    /// 
+    /// NOTA: Esta función es llamada desde el hilo principal de simulación,
+    /// no desde hilos mypthreads, por lo que usamos try_lock
     pub fn update(&mut self, current_time_ms: u64) {
         if self.bridge_type != BridgeType::TrafficLight {
             return;
         }
 
-        let mut state = self.state.lock().unwrap();
+        // CAMBIO: Usar try_lock en lugar de lock() directo
+        if let Some(mut state) = self.state.try_lock() {
+            if current_time_ms - state.last_light_change_ms >= self.light_cycle_ms {
+                // Cambiar el semáforo
+                state.light_state = match state.light_state {
+                    TrafficLightState::NorthGreen => TrafficLightState::SouthGreen,
+                    TrafficLightState::SouthGreen => TrafficLightState::NorthGreen,
+                };
+                state.last_light_change_ms = current_time_ms;
 
-        if current_time_ms - state.last_light_change_ms >= self.light_cycle_ms {
-            // Cambiar el semáforo
-            state.light_state = match state.light_state {
-                TrafficLightState::NorthGreen => TrafficLightState::SouthGreen,
-                TrafficLightState::SouthGreen => TrafficLightState::NorthGreen,
-            };
-            state.last_light_change_ms = current_time_ms;
-
-            println!(
-                "[Puente {}] Semáforo cambió a {:?}",
-                self.id, state.light_state
-            );
+                println!(
+                    "[Puente {}] Semáforo cambió a {:?}",
+                    self.id, state.light_state
+                );
+            }
         }
+        // Si no pudimos adquirir el lock, simplemente continuamos
+        // (el semáforo se actualizará en el siguiente tick)
     }
 
     /// Intentar cruzar el puente (vehículo)
-    // en bridge.rs
-
+    /// 
+    /// IMPORTANTE: Esta función debe ser llamada desde hilos mypthreads
+    /// Retorna true si el vehículo puede cruzar inmediatamente
     pub fn try_cross(&self, tid: ThreadId, priority: u8, direction: TrafficDirection) -> bool {
-        let mut state = self.state.lock().unwrap();
+        // CAMBIO: Usar try_lock en lugar de lock() porque estamos en un hilo mypthread
+        // y queremos evitar el ThreadSignal aquí
+        let Some(mut state) = self.state.try_lock() else {
+            // Si no podemos adquirir el lock, el hilo debe reintentar
+            return false;
+        };
 
         // No se puede cruzar si hay un barco (esta regla es absoluta)
         if state.boat_passing {
             return false;
         }
 
-        // --- NUEVA REGLA DE PRIORIDAD ---
+        // --- REGLA DE PRIORIDAD ALTA ---
         // Si un vehículo tiene alta prioridad (ej. > 50), intentará cruzar
         // ignorando las reglas normales de tráfico (semáforos, ceda el paso).
         if priority > 50 {
-            // La única condición es que haya espacio en el puente.
             if state.vehicles_crossing < self.capacity {
                 println!(
                     "[Puente {}] ¡ACCESO PRIORITARIO! Vehículo {} (prio:{}) cruzando.",
                     self.id, tid, priority
                 );
                 state.vehicles_crossing += 1;
-                // No cambiamos la dirección actual si ya hay tráfico, para no causar un "choque" lógico.
                 if state.vehicles_crossing == 1 {
                     state.current_direction = Some(direction);
                 }
                 return true;
             }
         }
-        // --- FIN DE LA NUEVA REGLA ---
 
         // --- LÓGICA NORMAL (para vehículos sin prioridad) ---
-        // (Este es tu código original, sin cambios)
         let can_cross = match self.bridge_type {
             BridgeType::TrafficLight => {
                 let light_allows = match state.light_state {
@@ -238,17 +241,18 @@ impl Bridge {
 
     /// Salir del puente (vehículo)
     pub fn exit_bridge(&self, tid: ThreadId) {
-        let mut state = self.state.lock().unwrap();
+        // CAMBIO: Usar try_lock
+        if let Some(mut state) = self.state.try_lock() {
+            if state.vehicles_crossing > 0 {
+                state.vehicles_crossing -= 1;
+                println!(
+                    "[Puente {}] Vehículo {} salió (restantes: {})",
+                    self.id, tid, state.vehicles_crossing
+                );
 
-        if state.vehicles_crossing > 0 {
-            state.vehicles_crossing -= 1;
-            println!(
-                "[Puente {}] Vehículo {} salió (restantes: {})",
-                self.id, tid, state.vehicles_crossing
-            );
-
-            if state.vehicles_crossing == 0 {
-                state.current_direction = None;
+                if state.vehicles_crossing == 0 {
+                    state.current_direction = None;
+                }
             }
         }
     }
@@ -259,7 +263,10 @@ impl Bridge {
             return false;
         }
 
-        let mut state = self.state.lock().unwrap();
+        // CAMBIO: Usar try_lock
+        let Some(mut state) = self.state.try_lock() else {
+            return false;
+        };
 
         if state.vehicles_crossing == 0 && !state.boat_passing {
             state.boat_passing = true;
@@ -275,16 +282,13 @@ impl Bridge {
 
     /// Un barco termina de pasar
     pub fn boat_exit(&self) {
-        let mut state = self.state.lock().unwrap();
-        state.boat_passing = false;
-        println!(
-            "[Puente {}] Barco terminó de pasar, puente levadizo ABAJO",
-            self.id
-        );
-    }
-
-    /// Obtener el mutex de acceso
-    pub fn get_mutex(&self) -> &SimpleMutex {
-        &self.access_mutex
+        // CAMBIO: Usar try_lock
+        if let Some(mut state) = self.state.try_lock() {
+            state.boat_passing = false;
+            println!(
+                "[Puente {}] Barco terminó de pasar, puente levadizo ABAJO",
+                self.id
+            );
+        }
     }
 }

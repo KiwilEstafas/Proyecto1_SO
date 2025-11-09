@@ -1,18 +1,15 @@
+// threadcity/src/sim/mod.rs
 // Sistema de simulacion de ThreadCity
+// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
 
-use crate::Vehicle;
 use crate::model::*;
-use crate:: {AgentType, AgentInfo};
-use rand::{rng, seq::IndexedRandom, Rng};
-use std::sync::{Arc, Mutex};
+use crate::{AgentInfo, AgentType};
 use mypthreads::thread::ThreadId;
+use rand::{rng, seq::IndexedRandom, Rng};
 use std::collections::HashMap;
-
-
-
+use crate::sync::Shared;
 
 #[derive(Debug, Clone)]
-
 pub struct Spawner {
     pub next_vehicle_spawn_ms: u64,
     pub next_boat_spawn_ms: u64,
@@ -39,8 +36,8 @@ impl City {
             commerces: Vec::new(),
             plants: Vec::new(),
             spawner: Spawner {
-                next_vehicle_spawn_ms: 1000, //EJEMPLO
-                next_boat_spawn_ms: 5000,    //EJEMPLO
+                next_vehicle_spawn_ms: 1000,
+                next_boat_spawn_ms: 5000,
             },
             agents: HashMap::new(),
         }
@@ -117,17 +114,17 @@ impl City {
                 if self.time_ms > fail_time {
                     plant.status = PlantStatus::Exploded;
                     println!(
-                    "\n☢️☢️☢️ ¡EXPLOSIÓN! Planta {} falló por falta de {:?} en tiempo {}ms (Límite era: {}ms)",
-                    plant.id, supply.kind, self.time_ms, fail_time
-                );
+                        "\n☢️☢️☢️ ¡EXPLOSIÓN! Planta {} falló por falta de {:?} en tiempo {}ms (Límite era: {}ms)",
+                        plant.id, supply.kind, self.time_ms, fail_time
+                    );
                     plant.reset(self.time_ms);
                     break; //Si explota no necesita revisar los demas suministros de la planta
                 } else if self.time_ms > risk_time && plant.status == PlantStatus::Ok {
                     plant.status = PlantStatus::AtRisk;
                     println!(
-                    "\n⚠️⚠️⚠️ ¡ALERTA! Planta {} en riesgo por {:?}. Tiempo: {}ms (Límite: {}ms)",
-                    plant.id, supply.kind, self.time_ms, deadline
-                );
+                        "\n⚠️⚠️⚠️ ¡ALERTA! Planta {} en riesgo por {:?}. Tiempo: {}ms (Límite: {}ms)",
+                        plant.id, supply.kind, self.time_ms, deadline
+                    );
                 }
             }
         }
@@ -175,8 +172,10 @@ impl City {
 }
 
 /// Estructura compartida de la ciudad para hilos
-pub type SharedCity = Arc<Mutex<City>>;
+/// CAMBIO IMPORTANTE: Ahora usa SharedMutex (MyMutex) en lugar de std::sync::Mutex
+pub type SharedCity = Shared<City>;
 
+/// Crea una ciudad compartida usando nuestro mutex
 pub fn create_shared_city(city: City) -> SharedCity {
-    Arc::new(Mutex::new(city))
+    crate::sync::shared(city)
 }

@@ -1,4 +1,5 @@
-// en threadcity/src/main.rs
+// threadcity/src/main.rs
+// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
 
 // --- IMPORTACIONES ---
 use mypthreads::{
@@ -6,13 +7,15 @@ use mypthreads::{
     ThreadId, ThreadSignal,
 };
 use rand::{prelude::*, rng};
-use std::sync::{
-    atomic::{AtomicU32, Ordering},
-    Arc, Mutex,
-};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
-use threadcity::{AgentInfo, AgentState, AgentType, Ambulance, Boat, Car, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind, TrafficDirection, Vehicle, create_city, create_shared_city, nearest_bridge};
+use threadcity::{
+    create_city, create_shared_city, nearest_bridge, AgentInfo, AgentState, AgentType, Ambulance,
+    Boat, Car, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind,
+    TrafficDirection, Vehicle,
+};
+
 // --- CONTADOR GLOBAL DE IDs ---
 static NEXT_AGENT_ID: AtomicU32 = AtomicU32::new(301);
 fn get_next_agent_id() -> u32 {
@@ -22,6 +25,7 @@ fn get_next_agent_id() -> u32 {
 fn main() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║           ThreadCity - Simulación Preemptiva              ║");
+    println!("║          [REFACTORIZADO: Usando MyMutex]                  ║");
     println!("╚════════════════════════════════════════════════════════════╝\n");
 
     // --- SETUP ---
@@ -29,25 +33,46 @@ fn main() {
     let shared_city = create_shared_city(city);
 
     // --- CONTADORES TOTALES ---
-    let total_cars = Arc::new(AtomicU32::new(0));
-    let total_ambulances = Arc::new(AtomicU32::new(0));
-    let total_trucks = Arc::new(AtomicU32::new(0));
-    let total_boats = Arc::new(AtomicU32::new(0));
+    // NOTA: AtomicU32 no necesita mutex, se mantiene igual
+    let total_cars = std::sync::Arc::new(AtomicU32::new(0));
+    let total_ambulances = std::sync::Arc::new(AtomicU32::new(0));
+    let total_trucks = std::sync::Arc::new(AtomicU32::new(0));
+    let total_boats = std::sync::Arc::new(AtomicU32::new(0));
 
     println!("Iniciando simulación...\n");
 
     // --- CREACIÓN INICIAL DE AGENTES ---
     for i in 0..5 {
-        spawn_car(i + 1, &layout, &shared_city, Arc::clone(&total_cars));
+        spawn_car(
+            i + 1,
+            &layout,
+            &shared_city,
+            std::sync::Arc::clone(&total_cars),
+        );
     }
     for i in 0..2 {
-        spawn_ambulance(i + 100, &layout, &shared_city, Arc::clone(&total_ambulances));
+        spawn_ambulance(
+            i + 100,
+            &layout,
+            &shared_city,
+            std::sync::Arc::clone(&total_ambulances),
+        );
     }
     println!("Creando camiones de carga aleatorios...");
     for i in 0..4 {
-        spawn_cargo_truck(200 + i, &layout, &shared_city, Arc::clone(&total_trucks));
+        spawn_cargo_truck(
+            200 + i,
+            &layout,
+            &shared_city,
+            std::sync::Arc::clone(&total_trucks),
+        );
     }
-    spawn_boat(300, &layout, &shared_city, Arc::clone(&total_boats));
+    spawn_boat(
+        300,
+        &layout,
+        &shared_city,
+        std::sync::Arc::clone(&total_boats),
+    );
 
     println!("Agentes iniciales creados.");
     println!();
@@ -56,36 +81,77 @@ fn main() {
     const SIMULATION_STEPS: u32 = 100;
     const TIME_PER_STEP_MS: u64 = 500;
     const SCHEDULER_CYCLES_PER_STEP: usize = 10;
-    println!("Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n", SIMULATION_STEPS, TIME_PER_STEP_MS);
+    println!(
+        "Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n",
+        SIMULATION_STEPS, TIME_PER_STEP_MS
+    );
 
     // --- BUCLE PRINCIPAL DE SIMULACIÓN ---
     for step in 0..SIMULATION_STEPS {
+        // CAMBIO: Usar try_lock en lugar de lock() directo desde el hilo principal
         let new_agents = {
-            let mut city_lock = shared_city.lock().unwrap();
+            // Intentar adquirir el lock, si no se puede, esperar un poco y reintentar
+            let mut city_lock = loop {
+                if let Some(lock) = shared_city.try_lock() {
+                    break lock;
+                }
+                // Si no pudimos adquirir el lock, dar tiempo a los hilos
+                thread::sleep(Duration::from_micros(100));
+            };
+
             city_lock.update(TIME_PER_STEP_MS);
             city_lock.check_plant_deadlines();
-            println!("\n--- [Paso {} | Tiempo: {}ms] ---", step, city_lock.current_time());
+            println!(
+                "\n--- [Paso {} | Tiempo: {}ms] ---",
+                step,
+                city_lock.current_time()
+            );
             city_lock.update_spawner()
         };
 
         for agent_type in new_agents {
             let new_id = get_next_agent_id();
             match agent_type {
-                AgentType::Car => spawn_car(new_id, &layout, &shared_city, Arc::clone(&total_cars)),
-                AgentType::Ambulance => spawn_ambulance(new_id, &layout, &shared_city, Arc::clone(&total_ambulances)),
-                AgentType::Boat => spawn_boat(new_id, &layout, &shared_city, Arc::clone(&total_boats)),
-                AgentType::CargoTruck(_) => {},
+                AgentType::Car => spawn_car(
+                    new_id,
+                    &layout,
+                    &shared_city,
+                    std::sync::Arc::clone(&total_cars),
+                ),
+                AgentType::Ambulance => spawn_ambulance(
+                    new_id,
+                    &layout,
+                    &shared_city,
+                    std::sync::Arc::clone(&total_ambulances),
+                ),
+                AgentType::Boat => spawn_boat(
+                    new_id,
+                    &layout,
+                    &shared_city,
+                    std::sync::Arc::clone(&total_boats),
+                ),
+                AgentType::CargoTruck(_) => {}
             }
         }
 
         {
             let tids_to_promote: Vec<u32> = {
-                let city_lock = shared_city.lock().unwrap();
+                // CAMBIO: Usar try_lock con retry
+                let city_lock = loop {
+                    if let Some(lock) = shared_city.try_lock() {
+                        break lock;
+                    }
+                    thread::sleep(Duration::from_micros(100));
+                };
+
                 let mut tids = Vec::new();
                 for plant in &city_lock.plants {
                     if plant.status == PlantStatus::AtRisk {
                         if let Some(needed_supply) = plant.requires.first() {
-                            println!("🚨 EMERGENCIA: Planta {} necesita {:?} urgentemente!", plant.id, needed_supply.kind);
+                            println!(
+                                "🚨 EMERGENCIA: Planta {} necesita {:?} urgentemente!",
+                                plant.id, needed_supply.kind
+                            );
                             for agent_info in city_lock.agents.values() {
                                 if let AgentType::CargoTruck(cargo) = agent_info.agent_type {
                                     if cargo == needed_supply.kind {
@@ -113,21 +179,38 @@ fn main() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║              Simulación Finalizada                        ║");
     println!("╠════════════════════════════════════════════════════════════╣");
-    println!("║ Carros Creados: {:>43} ║", total_cars.load(Ordering::Relaxed));
-    println!("║ Ambulancias Creadas: {:>39} ║", total_ambulances.load(Ordering::Relaxed));
-    println!("║ Camiones Creados: {:>42} ║", total_trucks.load(Ordering::Relaxed));
-    println!("║ Barcos Creados: {:>45} ║", total_boats.load(Ordering::Relaxed));
+    println!(
+        "║ Carros Creados: {:>43} ║",
+        total_cars.load(Ordering::Relaxed)
+    );
+    println!(
+        "║ Ambulancias Creadas: {:>39} ║",
+        total_ambulances.load(Ordering::Relaxed)
+    );
+    println!(
+        "║ Camiones Creados: {:>42} ║",
+        total_trucks.load(Ordering::Relaxed)
+    );
+    println!(
+        "║ Barcos Creados: {:>45} ║",
+        total_boats.load(Ordering::Relaxed)
+    );
     println!("╚════════════════════════════════════════════════════════════╝\n");
 }
 
 // --- FUNCIONES SPAWN ---
 
-fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<AtomicU32>) {
+fn spawn_car(
+    id: u32,
+    layout: &CityLayout,
+    city: &SharedCity,
+    counter: std::sync::Arc<AtomicU32>,
+) {
     counter.fetch_add(1, Ordering::Relaxed);
     let mut rng = rng();
     let origin = random_position(&mut rng, layout);
     let dest = random_destination(&mut rng, layout, origin);
-    let city_clone = Arc::clone(city);
+    let city_clone = city.clone();
     let layout_clone = layout.clone();
     let mut pos = origin;
     let mut state = AgentState::Traveling;
@@ -139,22 +222,46 @@ fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<Atomi
         &format!("Car-{}", id),
         SchedulerParams::Lottery { tickets: 10 },
         Box::new(move |tid_interno, current_tickets| {
-            vehicle_logic(tid_interno, id, AgentType::Car, current_tickets, &mut pos, dest, &mut state, &mut crossing_steps, &city_clone, &layout_clone)
+            vehicle_logic(
+                tid_interno,
+                id,
+                AgentType::Car,
+                current_tickets,
+                &mut pos,
+                dest,
+                &mut state,
+                &mut crossing_steps,
+                &city_clone,
+                &layout_clone,
+            )
         }),
     );
     let agent_info = AgentInfo {
         vehicle: Vehicle::new(id, tid, origin, dest),
         agent_type: AgentType::Car,
     };
-    city.lock().unwrap().agents.insert(tid, agent_info);
+
+    // CAMBIO: Usar try_lock con retry para insertar el agente
+    loop {
+        if let Some(mut city_lock) = city.try_lock() {
+            city_lock.agents.insert(tid, agent_info);
+            break;
+        }
+        thread::sleep(Duration::from_micros(50));
+    }
 }
 
-fn spawn_ambulance(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<AtomicU32>) {
+fn spawn_ambulance(
+    id: u32,
+    layout: &CityLayout,
+    city: &SharedCity,
+    counter: std::sync::Arc<AtomicU32>,
+) {
     counter.fetch_add(1, Ordering::Relaxed);
     let mut rng = rng();
     let origin = random_position(&mut rng, layout);
     let dest = random_destination(&mut rng, layout, origin);
-    let city_clone = Arc::clone(city);
+    let city_clone = city.clone();
     let layout_clone = layout.clone();
     let mut pos = origin;
     let mut state = AgentState::Traveling;
@@ -166,7 +273,18 @@ fn spawn_ambulance(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc
         &format!("Ambulance-{}", id),
         SchedulerParams::Lottery { tickets: 100 },
         Box::new(move |tid_interno, current_tickets| {
-            vehicle_logic(tid_interno, id, AgentType::Ambulance, current_tickets, &mut pos, dest, &mut state, &mut crossing_steps, &city_clone, &layout_clone)
+            vehicle_logic(
+                tid_interno,
+                id,
+                AgentType::Ambulance,
+                current_tickets,
+                &mut pos,
+                dest,
+                &mut state,
+                &mut crossing_steps,
+                &city_clone,
+                &layout_clone,
+            )
         }),
     );
     let ambulance = Ambulance::new(id, tid, (origin.x, origin.y), (dest.x, dest.y));
@@ -174,10 +292,23 @@ fn spawn_ambulance(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc
         vehicle: ambulance.inner,
         agent_type: AgentType::Ambulance,
     };
-    city.lock().unwrap().agents.insert(tid, agent_info);
+
+    // CAMBIO: Usar try_lock con retry
+    loop {
+        if let Some(mut city_lock) = city.try_lock() {
+            city_lock.agents.insert(tid, agent_info);
+            break;
+        }
+        thread::sleep(Duration::from_micros(50));
+    }
 }
 
-fn spawn_cargo_truck(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<AtomicU32>) {
+fn spawn_cargo_truck(
+    id: u32,
+    layout: &CityLayout,
+    city: &SharedCity,
+    counter: std::sync::Arc<AtomicU32>,
+) {
     counter.fetch_add(1, Ordering::Relaxed);
     let mut rng = rng();
     let origin = random_position(&mut rng, layout);
@@ -186,40 +317,88 @@ fn spawn_cargo_truck(id: u32, layout: &CityLayout, city: &SharedCity, counter: A
     let deadline: u64;
 
     {
-        let city_lock = city.lock().unwrap();
-        let plant = city_lock.plants.choose(&mut rng).expect("No hay plantas").clone();
+        // CAMBIO: Usar try_lock con retry
+        let city_lock = loop {
+            if let Some(lock) = city.try_lock() {
+                break lock;
+            }
+            thread::sleep(Duration::from_micros(100));
+        };
+
+        let plant = city_lock
+            .plants
+            .choose(&mut rng)
+            .expect("No hay plantas")
+            .clone();
         destination = plant.loc;
-        let supply_spec = plant.requires.iter().find(|s| s.kind == cargo).expect("Suministro no requerido");
+        let supply_spec = plant
+            .requires
+            .iter()
+            .find(|s| s.kind == cargo)
+            .expect("Suministro no requerido");
         deadline = city_lock.current_time() + supply_spec.deadline_ms;
     }
 
-    let city_clone = Arc::clone(city);
+    let city_clone = city.clone();
     let layout_clone = layout.clone();
     let mut pos = origin;
     let mut state = AgentState::Traveling;
     let mut crossing_steps = 0u32;
     let cargo_for_thread = cargo;
 
-    println!("🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms", id, cargo, origin, destination, deadline);
+    println!(
+        "🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms",
+        id, cargo, origin, destination, deadline
+    );
 
     let tid = my_thread_create(
         &format!("Truck-{}", id),
         SchedulerParams::RealTime { deadline },
         Box::new(move |tid_interno, current_tickets| {
-            cargo_truck_logic(tid_interno, id, cargo_for_thread, current_tickets, &mut pos, destination, &mut state, &mut crossing_steps, &city_clone, &layout_clone)
+            cargo_truck_logic(
+                tid_interno,
+                id,
+                cargo_for_thread,
+                current_tickets,
+                &mut pos,
+                destination,
+                &mut state,
+                &mut crossing_steps,
+                &city_clone,
+                &layout_clone,
+            )
         }),
     );
-    let truck = CargoTruck::new(id, tid, (origin.x, origin.y), (destination.x, destination.y), cargo);
+    let truck = CargoTruck::new(
+        id,
+        tid,
+        (origin.x, origin.y),
+        (destination.x, destination.y),
+        cargo,
+    );
     let agent_info = AgentInfo {
         vehicle: truck.inner,
         agent_type: AgentType::CargoTruck(cargo),
     };
-    city.lock().unwrap().agents.insert(tid, agent_info);
+
+    // CAMBIO: Usar try_lock con retry
+    loop {
+        if let Some(mut city_lock) = city.try_lock() {
+            city_lock.agents.insert(tid, agent_info);
+            break;
+        }
+        thread::sleep(Duration::from_micros(50));
+    }
 }
 
-fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<AtomicU32>) {
+fn spawn_boat(
+    id: u32,
+    layout: &CityLayout,
+    city: &SharedCity,
+    counter: std::sync::Arc<AtomicU32>,
+) {
     counter.fetch_add(1, Ordering::Relaxed);
-    let city_clone = Arc::clone(city);
+    let city_clone = city.clone();
     let layout_clone = layout.clone();
     let origin = Coord::new(layout.bridge1_row, layout.river_column);
     let dest = Coord::new(layout.bridge3_row + 1, layout.river_column);
@@ -233,7 +412,17 @@ fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<Atom
         &format!("Boat-{}", id),
         SchedulerParams::RoundRobin,
         Box::new(move |tid_interno, current_tickets| {
-            boat_logic(tid_interno, id, current_tickets, &mut pos, dest, &mut state, &mut crossing_steps, &city_clone, &layout_clone)
+            boat_logic(
+                tid_interno,
+                id,
+                current_tickets,
+                &mut pos,
+                dest,
+                &mut state,
+                &mut crossing_steps,
+                &city_clone,
+                &layout_clone,
+            )
         }),
     );
     let boat = Boat::new(id, tid, (origin.x, origin.y), (dest.x, dest.y));
@@ -241,7 +430,15 @@ fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: Arc<Atom
         vehicle: boat.inner,
         agent_type: AgentType::Boat,
     };
-    city.lock().unwrap().agents.insert(tid, agent_info);
+
+    // CAMBIO: Usar try_lock con retry
+    loop {
+        if let Some(mut city_lock) = city.try_lock() {
+            city_lock.agents.insert(tid, agent_info);
+            break;
+        }
+        thread::sleep(Duration::from_micros(50));
+    }
 }
 
 // --- LÓGICA DE AGENTES Y HELPERS ---
@@ -273,8 +470,10 @@ fn vehicle_logic(
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
-            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column) || (pos.y > layout.river_column && dest.y < layout.river_column);
-            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column) || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
+            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
+                || (pos.y > layout.river_column && dest.y < layout.river_column);
+            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column)
+                || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
 
             if needs_bridge && at_bridge_entrance {
                 println!("[{}] 🚦 En entrada de puente", id);
@@ -286,16 +485,27 @@ fn vehicle_logic(
         }
         AgentState::WaitingForBridge => {
             let scheduler_bonus = current_tickets;
-            let city_lock = city.lock().unwrap();
+
+            // CAMBIO: Usar try_lock - si no podemos acceder, bloqueamos el hilo
+            let Some(city_lock) = city.try_lock() else {
+                return ThreadSignal::Block;
+            };
+
             let bridge_id = nearest_bridge(layout, pos.x);
-            let bridge = city_lock.get_bridge(bridge_id).expect("Puente no encontrado");
+            let bridge = city_lock
+                .get_bridge(bridge_id)
+                .expect("Puente no encontrado");
 
             let base_priority = match agent_type {
                 AgentType::Ambulance => 100,
                 _ => 0,
             };
             let final_priority = base_priority + scheduler_bonus as u8;
-            let direction = if pos.y < layout.river_column { TrafficDirection::NorthToSouth } else { TrafficDirection::SouthToNorth };
+            let direction = if pos.y < layout.river_column {
+                TrafficDirection::NorthToSouth
+            } else {
+                TrafficDirection::SouthToNorth
+            };
 
             if agent_type == AgentType::Ambulance {
                 println!("[{}] 🚑 AMBULANCIA pasando directamente", id);
@@ -323,13 +533,19 @@ fn vehicle_logic(
                 } else {
                     pos.y = layout.river_column - 1;
                 }
-                let city_lock = city.lock().unwrap();
-                let bridge_id = nearest_bridge(layout, pos.x);
-                let bridge = city_lock.get_bridge(bridge_id).expect("Puente no encontrado");
-                if agent_type != AgentType::Ambulance {
-                    bridge.exit_bridge(tid);
+
+                // CAMBIO: Usar try_lock
+                if let Some(city_lock) = city.try_lock() {
+                    let bridge_id = nearest_bridge(layout, pos.x);
+                    let bridge = city_lock
+                        .get_bridge(bridge_id)
+                        .expect("Puente no encontrado");
+                    if agent_type != AgentType::Ambulance {
+                        bridge.exit_bridge(tid);
+                    }
+                    drop(city_lock);
                 }
-                drop(city_lock);
+
                 println!("[{}] Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
             }
@@ -354,19 +570,31 @@ fn cargo_truck_logic(
     match *state {
         AgentState::Traveling => {
             if pos.x == dest.x && pos.y == dest.y {
-                let mut city_lock = city.lock().unwrap();
-                let current_time = city_lock.current_time();
-                if let Some(plant) = city_lock.find_plant_at(dest) {
-                    let supply = plant.requires.iter().find(|s| s.kind == cargo).expect("Suministro no requerido").clone();
-                    plant.commit_delivery(supply, current_time);
-                    println!("[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}", id, cargo, dest);
+                // CAMBIO: Usar try_lock
+                if let Some(mut city_lock) = city.try_lock() {
+                    let current_time = city_lock.current_time();
+                    if let Some(plant) = city_lock.find_plant_at(dest) {
+                        let supply = plant
+                            .requires
+                            .iter()
+                            .find(|s| s.kind == cargo)
+                            .expect("Suministro no requerido")
+                            .clone();
+                        plant.commit_delivery(supply, current_time);
+                        println!(
+                            "[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}",
+                            id, cargo, dest
+                        );
+                    }
+                    drop(city_lock);
                 }
-                drop(city_lock);
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
-            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column) || (pos.y > layout.river_column && dest.y < layout.river_column);
-            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column) || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
+            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
+                || (pos.y > layout.river_column && dest.y < layout.river_column);
+            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column)
+                || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
             if needs_bridge && at_bridge_entrance {
                 *state = AgentState::WaitingForBridge;
                 return ThreadSignal::Yield;
@@ -374,9 +602,18 @@ fn cargo_truck_logic(
             move_towards(pos, dest, layout);
             ThreadSignal::Yield
         }
-        AgentState::WaitingForBridge | AgentState::CrossingBridge => {
-            vehicle_logic(tid, id, AgentType::CargoTruck(cargo), current_tickets, pos, dest, state, crossing_steps, city, layout)
-        }
+        AgentState::WaitingForBridge | AgentState::CrossingBridge => vehicle_logic(
+            tid,
+            id,
+            AgentType::CargoTruck(cargo),
+            current_tickets,
+            pos,
+            dest,
+            state,
+            crossing_steps,
+            city,
+            layout,
+        ),
         AgentState::Arrived => ThreadSignal::Exit,
     }
 }
@@ -384,7 +621,7 @@ fn cargo_truck_logic(
 fn boat_logic(
     tid: ThreadId,
     id: u32,
-    _current_tickets: u32, // Los barcos no usan prioridad, pero la firma debe coincidir
+    _current_tickets: u32,
     pos: &mut Coord,
     dest: Coord,
     state: &mut AgentState,
@@ -409,7 +646,11 @@ fn boat_logic(
             ThreadSignal::Yield
         }
         AgentState::WaitingForBridge => {
-            let city_lock = city.lock().unwrap();
+            // CAMBIO: Usar try_lock
+            let Some(city_lock) = city.try_lock() else {
+                return ThreadSignal::Block;
+            };
+
             let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
             if bridge.boat_request_pass() {
                 println!("[Boat-{}] ⛵ Puente levadizo levantado, pasando", id);
@@ -425,10 +666,12 @@ fn boat_logic(
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
             if *crossing_steps >= 5 {
-                let city_lock = city.lock().unwrap();
-                let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
-                bridge.boat_exit();
-                drop(city_lock);
+                // CAMBIO: Usar try_lock
+                if let Some(city_lock) = city.try_lock() {
+                    let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
+                    bridge.boat_exit();
+                    drop(city_lock);
+                }
                 pos.x += 1;
                 println!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
