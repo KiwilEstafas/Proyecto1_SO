@@ -5,7 +5,7 @@ use mypthreads::mypthreads_api::*;
 use mypthreads::runtime::ThreadRuntimeV2;
 use mypthreads::signals::ThreadSignal;
 use mypthreads::thread::ThreadId;
-use rand::Rng;
+use rand::{rng, seq::IndexedRandom, Rng};
 use std::sync::{Arc, Mutex};
 use threadcity::*;
 
@@ -57,38 +57,12 @@ fn main() {
     }
 
     // Crear camiones de carga para las plantas
-    spawn_cargo_truck(
-        200,
-        SupplyKind::Radioactive,
-        (0, 0),
-        (1, 0),
-        &layout,
-        &shared_city,
-    );
-    spawn_cargo_truck(
-        201,
-        SupplyKind::Water,
-        (0, 0),
-        (1, 0),
-        &layout,
-        &shared_city,
-    );
-    spawn_cargo_truck(
-        202,
-        SupplyKind::Radioactive,
-        (0, 4),
-        (2, 4),
-        &layout,
-        &shared_city,
-    );
-    spawn_cargo_truck(
-        203,
-        SupplyKind::Water,
-        (0, 4),
-        (2, 4),
-        &layout,
-        &shared_city,
-    );
+    println!("Creando camiones de carga aleatorios...");
+    for i in 0..4 {
+        // La nueva función solo necesita el ID, el layout y la ciudad.
+        // El resto (origen, destino, carga) se decide dentro de la función.
+        spawn_cargo_truck(200 + i, &layout, &shared_city);
+    }
     *trucks_created.lock().unwrap() = 4;
 
     // Crear un barco
@@ -234,44 +208,64 @@ fn spawn_ambulance(id: u32, layout: &CityLayout, city: &SharedCity) {
     );
 }
 
+fn random_supply_kind(rng: &mut rand::prelude::ThreadRng) -> SupplyKind {
+    if rng.random_bool(0.5) {
+        SupplyKind::Radioactive
+    } else {
+        SupplyKind::Water
+    }
+}
+
 /// Crea un camión de carga para planta nuclear
-fn spawn_cargo_truck(
-    id: u32,
-    cargo: SupplyKind,
-    origin: (u32, u32),
-    dest: (u32, u32),
-    layout: &CityLayout,
-    city: &SharedCity,
-) {
-    let city_clone = Arc::clone(city);
-    let layout_clone = layout.clone();
+/// Crea un camión de carga con origen, destino (planta) y carga aleatorios.
+fn spawn_cargo_truck(id: u32, layout: &CityLayout, city: &SharedCity) {
+    // Obtenemos el generador de números aleatorios una vez
+    let mut rng = rand::thread_rng();
 
-    let mut pos = Coord::new(origin.0, origin.1);
-    let destination = Coord::new(dest.0, dest.1);
-    let mut state = AgentState::Moving;
-    let mut crossing_steps = 0u32;
+    // 1. Generar un origen y una carga aleatorios
+    let origin = random_position(&mut rng, layout);
+    let cargo = random_supply_kind(&mut rng);
 
-    // Calcular deadline basado en la planta
-    let deadline = {
+    // Variables que obtendremos de la ciudad
+    let destination: Coord;
+    let deadline: u64;
+
+    // 2. Bloquear la ciudad UNA SOLA VEZ para obtener la información de la planta
+    {
+        // Usamos un bloque para que el Mutex se libere lo antes posible
         let city_lock = city.lock().unwrap();
+
+        // Elegimos una planta al azar de la lista
+        // .expect es para simplificar; en un programa real manejaríamos el caso de que no haya plantas
         let plant = city_lock
             .plants
-            .iter()
-            .find(|p| p.loc.x == destination.x && p.loc.y == destination.y)
-            .expect("Planta no encontrada");
+            .choose(&mut rng)
+            .expect("No se encontraron plantas en la ciudad")
+            .clone();
 
-        let supply = plant
+        // El destino es la ubicación de la planta elegida
+        destination = plant.loc;
+
+        // Calculamos el deadline usando la información de ESA planta
+        let supply_spec = plant
             .requires
             .iter()
             .find(|s| s.kind == cargo)
-            .expect("Suministro no requerido");
+            .expect("La planta no requiere este suministro");
 
-        city_lock.current_time() + supply.deadline_ms
-    };
+        deadline = city_lock.current_time() + supply_spec.deadline_ms;
+    } // El Mutex se libera aquí
+
+    // Preparamos los clones para el hilo ANTES de mover las variables
+    let city_clone = Arc::clone(city);
+    let layout_clone = layout.clone();
+    let mut pos = origin; // El estado inicial se basa en el origen aleatorio
+    let mut state = AgentState::Moving;
+    let mut crossing_steps = 0u32;
 
     println!(
         "🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms",
-        id, cargo, origin, dest, deadline
+        id, cargo, origin, destination, deadline
     );
 
     my_thread_create(
@@ -283,7 +277,7 @@ fn spawn_cargo_truck(
                 id,
                 cargo,
                 &mut pos,
-                destination,
+                destination, // Usamos el destino aleatorio
                 &mut state,
                 &mut crossing_steps,
                 &city_clone,

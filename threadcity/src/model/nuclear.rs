@@ -20,7 +20,7 @@ pub struct DeadlinePolicy {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum PlantStatus { Ok, AtRisk, Exploded }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct NuclearPlant {
     pub id: u32,
     pub status: PlantStatus,
