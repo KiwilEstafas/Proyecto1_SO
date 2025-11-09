@@ -1,109 +1,153 @@
 // threadcity/src/sync.rs
-// Wrappers ergonómicos sobre MyMutex para uso en la simulación
+//
+// Wrapper sobre MyMutex que respeta el contrato de ThreadSignal.
+// 
+// REGLA FUNDAMENTAL: Los métodos que invocan my_mutex_lock/unlock DEBEN
+// retornar ThreadSignal al caller, quien debe devolverlo al runtime.
+// NO usamos RAII (Drop) para unlock porque eso perdería el ThreadSignal.
 
-use mypthreads::mypthreads_api::{my_mutex_init, my_mutex_lock, my_mutex_unlock, MyMutex};
-use mypthreads::ThreadSignal;
+use mypthreads::mypthreads_api::{my_mutex_destroy, my_mutex_init, my_mutex_lock, my_mutex_trylock, my_mutex_unlock, MyMutex};
+use mypthreads::signals::ThreadSignal;
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
 use std::sync::Arc;
 
-/// Wrapper thread-safe sobre MyMutex que proporciona una API similar a std::sync::Mutex
+/// Contenedor thread-safe para datos compartidos usando MyMutex.
 /// 
-/// IMPORTANTE: Este wrapper está diseñado para uso DENTRO de hilos mypthreads.
-/// La operación `lock()` puede causar que el hilo se bloquee usando ThreadSignal::Block
-pub struct SharedMutex<T> {
-    inner: MyMutex,
+/// A diferencia de std::sync::Mutex, este wrapper NO usa RAII para unlock
+/// porque my_mutex_unlock retorna ThreadSignal que debe ser devuelto al runtime.
+pub struct MyMutexCell<T> {
+    mtx: MyMutex,
     data: UnsafeCell<T>,
 }
 
-// SAFETY: SharedMutex es Send si T es Send porque el mutex protege el acceso
-unsafe impl<T: Send> Send for SharedMutex<T> {}
-// SAFETY: SharedMutex es Sync porque proporciona acceso exclusivo mediante el mutex
-unsafe impl<T: Send> Sync for SharedMutex<T> {}
+// SAFETY: MyMutexCell es Send si T es Send (el mutex protege el acceso)
+unsafe impl<T: Send> Send for MyMutexCell<T> {}
 
-impl<T> SharedMutex<T> {
-    /// Crea un nuevo SharedMutex con el valor dado
+// SAFETY: MyMutexCell es Sync si T es Send (acceso exclusivo vía mutex)
+unsafe impl<T: Send> Sync for MyMutexCell<T> {}
+
+impl<T> MyMutexCell<T> {
+    /// Crea un nuevo MyMutexCell con el valor dado
     pub fn new(value: T) -> Self {
         Self {
-            inner: my_mutex_init(),
+            mtx: my_mutex_init(),
             data: UnsafeCell::new(value),
         }
     }
 
-    /// Adquiere el mutex, bloqueando el hilo si es necesario
+    // ═══════════════════════════════════════════════════════════════════
+    // CAMINO COOPERATIVO (con señales ThreadSignal)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Paso 1: Solicitar el lock.
     /// 
-    /// NOTA: Esta función retorna ThreadSignal para que el hilo pueda
-    /// comunicarse con el runtime si necesita bloquearse
-    pub fn lock(&self) -> (SharedMutexGuard<T>, ThreadSignal) {
-        let signal = my_mutex_lock(&self.inner);
-        
-        // El guard se crea siempre, pero el ThreadSignal indica si debemos bloquearnos
-        let guard = SharedMutexGuard {
-            mutex: self,
-            _no_send: std::marker::PhantomData,
-        };
-        
-        (guard, signal)
+    /// IMPORTANTE: El ThreadSignal retornado DEBE ser devuelto al runtime.
+    /// 
+    /// - Si retorna `ThreadSignal::MutexLock(addr)`: el hilo NO tiene el lock aún,
+    ///   el runtime lo bloqueará y lo reanudará cuando se otorgue el lock.
+    /// - Si retorna `ThreadSignal::Continue`: el lock se adquirió inmediatamente,
+    ///   puede proceder a llamar `enter()`.
+    pub fn request_lock(&self) -> ThreadSignal {
+        my_mutex_lock(&self.mtx)
     }
 
-    /// Intenta adquirir el mutex sin bloquearse
-    /// Retorna Some(guard) si tuvo éxito, None si el mutex está ocupado
-    pub fn try_lock(&self) -> Option<SharedMutexGuard<T>> {
-        if mypthreads::mypthreads_api::my_mutex_trylock(&self.inner) {
-            Some(SharedMutexGuard {
-                mutex: self,
+    /// Paso 2: Entrar a la sección crítica (después de que el runtime otorgó el lock).
+    /// 
+    /// PRECONDICIÓN: El hilo debe haber sido reanudado por el runtime después de
+    /// que `request_lock()` retornó `MutexLock`, O haber recibido `Continue`.
+    /// 
+    /// Retorna un guard que permite acceso mutable a los datos.
+    /// 
+    /// IMPORTANTE: Este guard NO libera el lock en Drop. Debe llamarse
+    /// explícitamente a `request_unlock()` cuando termine.
+    pub fn enter(&self) -> MyGuard<'_, T> {
+        MyGuard {
+            cell: self,
+            _no_send: std::marker::PhantomData,
+        }
+    }
+
+    /// Paso 3: Liberar el lock.
+    /// 
+    /// IMPORTANTE: El ThreadSignal retornado DEBE ser devuelto al runtime.
+    /// 
+    /// Retorna generalmente `ThreadSignal::Continue`, pero el caller debe
+    /// devolverlo al runtime para mantener el contrato correcto.
+    pub fn request_unlock(&self) -> ThreadSignal {
+        my_mutex_unlock(&self.mtx)
+    }
+
+    // ═══════════════════════════════════════════════════════════════════
+    // CAMINO NO BLOQUEANTE (sin señales ThreadSignal)
+    // ═══════════════════════════════════════════════════════════════════
+
+    /// Intenta adquirir el lock sin bloquearse.
+    /// 
+    /// - Si retorna `Some(guard)`: el lock fue adquirido, puede usar el guard
+    /// - Si retorna `None`: el lock no está disponible
+    /// 
+    /// IMPORTANTE: Cuando termine de usar el guard, debe llamarse explícitamente
+    /// a `request_unlock()` para liberar el lock.
+    /// 
+    /// Nota: Este método usa `my_mutex_trylock` internamente, que NO requiere
+    /// contexto de hilo inicializado (puede llamarse desde cualquier hilo).
+    pub fn try_enter(&self) -> Option<MyGuard<'_, T>> {
+        if my_mutex_trylock(&self.mtx) {
+            Some(MyGuard {
+                cell: self,
                 _no_send: std::marker::PhantomData,
             })
         } else {
             None
         }
     }
+}
 
-    /// Acceso directo a los datos (UNSAFE - solo usar si ya tienes el lock)
-    /// 
-    /// # Safety
-    /// El caller debe garantizar que tiene acceso exclusivo al mutex
-    #[allow(dead_code)]
-    unsafe fn get_unchecked(&self) -> &mut T {
-        &mut *self.data.get()
+impl<T> Drop for MyMutexCell<T> {
+    fn drop(&mut self) {
+        // Destruir el mutex cuando se destruye el cell
+        my_mutex_destroy(&mut self.mtx);
     }
 }
 
-/// Guard que proporciona acceso a los datos protegidos por el mutex
+/// Guard que proporciona acceso a los datos protegidos.
 /// 
-/// Cuando se drop, automáticamente libera el mutex
-pub struct SharedMutexGuard<'a, T> {
-    mutex: &'a SharedMutex<T>,
+/// CRÍTICO: Este guard NO libera el lock en Drop.
+/// El caller debe llamar explícitamente a `request_unlock()` para liberar.
+/// 
+/// Esto es necesario porque `my_mutex_unlock()` retorna un `ThreadSignal`
+/// que debe ser devuelto al runtime, y no podemos hacer eso desde `Drop`.
+pub struct MyGuard<'a, T> {
+    cell: &'a MyMutexCell<T>,
     _no_send: std::marker::PhantomData<*const ()>, // Hace que Guard no sea Send
 }
 
-impl<T> Deref for SharedMutexGuard<'_, T> {
+impl<T> Deref for MyGuard<'_, T> {
     type Target = T;
 
-    fn deref(&self) -> &T {
-        unsafe { &*self.mutex.data.get() }
+    fn deref(&self) -> &Self::Target {
+        // SAFETY: El guard solo existe cuando tenemos el lock
+        unsafe { &*self.cell.data.get() }
     }
 }
 
-impl<T> DerefMut for SharedMutexGuard<'_, T> {
-    fn deref_mut(&mut self) -> &mut T {
-        unsafe { &mut *self.mutex.data.get() }
+impl<T> DerefMut for MyGuard<'_, T> {
+    fn deref_mut(&mut self) -> &mut Self::Target {
+        // SAFETY: El guard solo existe cuando tenemos el lock
+        unsafe { &mut *self.cell.data.get() }
     }
 }
 
-impl<T> Drop for SharedMutexGuard<'_, T> {
-    fn drop(&mut self) {
-        // Liberar el mutex cuando se destruye el guard
-        my_mutex_unlock(&self.mutex.inner);
-    }
-}
+// NO implementamos Drop para MyGuard
+// El unlock debe ser explícito para no perder el ThreadSignal
 
-/// Tipo conveniente para compartir datos protegidos por mutex entre hilos
-pub type Shared<T> = Arc<SharedMutex<T>>;
+/// Tipo conveniente para compartir MyMutexCell entre hilos
+pub type Shared<T> = Arc<MyMutexCell<T>>;
 
-/// Función helper para crear datos compartidos
+/// Función helper para crear un Shared
 pub fn shared<T>(value: T) -> Shared<T> {
-    Arc::new(SharedMutex::new(value))
+    Arc::new(MyMutexCell::new(value))
 }
 
 #[cfg(test)]
@@ -111,20 +155,28 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_shared_mutex_creation() {
-        let mutex = SharedMutex::new(42);
+    fn test_basic_creation() {
+        let cell = MyMutexCell::new(42);
         
-        // Verificar que try_lock funciona
-        let guard = mutex.try_lock().expect("Should acquire lock");
-        assert_eq!(*guard, 42);
+        // try_enter debería funcionar sin contexto de hilo
+        if let Some(mut guard) = cell.try_enter() {
+            assert_eq!(*guard, 42);
+            *guard = 100;
+            drop(guard); // Drop no hace unlock
+            
+            // Manualmente liberar
+            cell.request_unlock();
+        }
     }
 
     #[test]
     fn test_shared_creation() {
-        let shared = shared(vec![1, 2, 3]);
+        let shared_cell = shared(vec![1, 2, 3]);
         
-        if let Some(guard) = shared.try_lock() {
+        if let Some(guard) = shared_cell.try_enter() {
             assert_eq!(guard.len(), 3);
+            drop(guard);
+            shared_cell.request_unlock();
         }
     }
 }
