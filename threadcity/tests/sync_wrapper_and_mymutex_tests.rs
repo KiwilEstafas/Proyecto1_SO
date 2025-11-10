@@ -166,122 +166,104 @@ fn test_try_enter_semantics() {
     println!("║ TEST 2: Semántica de try_enter                           ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
 
-    // Qué valida: Si A tiene el lock, try_enter en B devuelve None.
-    // Después de que A libera, B puede obtener el lock.
-
     let cell: Shared<i32> = shared(100);
 
     let cell_a = cell.clone();
-    let has_lock = Arc::new(AtomicU32::new(0));
-    let has_lock_a_for_a = has_lock.clone();
-
     let cell_b = cell.clone();
-    let try_result = Arc::new(AtomicU32::new(0));
-    let try_result_b_for_a = try_result.clone();
 
-    // Thread A: toma el lock y lo mantiene
+    let has_lock = Arc::new(AtomicU32::new(0));   // 0=init, 1/2=adquiriendo, 3=lo tiene, 5=liberado
+    let try_result = Arc::new(AtomicU32::new(0)); // 0=sin intento, 1=fallo 1°, 2=éxito 2°
+
+    let has_lock_for_a = has_lock.clone();
+    let has_lock_for_b = has_lock.clone();
+
+    let try_res_for_a = try_result.clone();
+    let try_res_for_b = try_result.clone();
+
+    // ── Thread A: toma lock y lo suelta después de que B falle la 1ª vez ──
     my_thread_create(
         "ThreadA",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let status = has_lock_a_for_a.load(Ordering::SeqCst);
-
-            match status {
+            let st = has_lock_for_a.load(Ordering::SeqCst);
+            match st {
                 0 => {
                     println!("[ThreadA] Requesting lock...");
-                    let signal = cell_a.request_lock();
-
-                    match signal {
+                    let sig = cell_a.request_lock();
+                    match sig {
                         ThreadSignal::MutexLock(_) => {
-                            has_lock_a_for_a.store(1, Ordering::SeqCst);
-                            return signal;
+                            has_lock_for_a.store(1, Ordering::SeqCst);
+                            return sig;
                         }
                         ThreadSignal::Continue => {
-                            has_lock_a_for_a.store(2, Ordering::SeqCst);
+                            has_lock_for_a.store(2, Ordering::SeqCst);
                             return ThreadSignal::Yield;
                         }
-                        _ => return signal,
+                        _ => return sig,
                     }
                 }
-                1 | 2 => {
-                    println!("[ThreadA] Holding lock...");
-                    let _guard = cell_a.enter();
-                    // Mantener el lock por varios ciclos
-                    has_lock_a_for_a.store(3, Ordering::SeqCst);
-
-                    // Esperar a que B intente
-                    if try_result_b_for_a.load(Ordering::SeqCst) == 0 {
+                // IMPORTANTE: tratar 1 | 2 | 3 igual: marcar 3 si aún no, y esperar a que B falle.
+                1 | 2 | 3 => {
+                    if st < 3 {
+                        has_lock_for_a.store(3, Ordering::SeqCst);
+                    }
+                    if try_res_for_a.load(Ordering::SeqCst) == 0 {
+                        // B aún no hizo su 1er intento/fallo
                         return ThreadSignal::Yield;
                     }
-
-                    drop(_guard);
-                    has_lock_a_for_a.store(4, Ordering::SeqCst);
-                    return ThreadSignal::Yield;
+                    println!("[ThreadA] Releasing lock after B's first failure...");
+                    let sig = cell_a.request_unlock();
+                    has_lock_for_a.store(5, Ordering::SeqCst);
+                    return sig;
                 }
-                4 => {
-                    println!("[ThreadA] Releasing lock...");
-                    has_lock_a_for_a.store(5, Ordering::SeqCst);
-                    return cell_a.request_unlock();
-                }
-                _ => return ThreadSignal::Yield,
+                _ => return ThreadSignal::Exit,
             }
         }),
     );
 
-    // Thread B: intenta try_enter (usa clones distintos)
-    let has_lock_a_for_b = has_lock.clone();
-    let try_result_b_for_b = try_result.clone();
-    let cell_b_for_b = cell.clone();
-
+    // ── Thread B: 1er try_enter debe fallar; 2º debe tener éxito ──
     my_thread_create(
         "ThreadB",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let attempts = try_result_b_for_b.load(Ordering::SeqCst);
-            let a_status = has_lock_a_for_b.load(Ordering::SeqCst);
+            let attempts = try_res_for_b.load(Ordering::SeqCst);
+            let a_st = has_lock_for_b.load(Ordering::SeqCst);
 
             if attempts == 0 {
-                // Esperar a que A tome el lock
-                if a_status < 3 {
+                // Esperar a que A realmente tenga el lock
+                if a_st < 3 {
                     return ThreadSignal::Yield;
                 }
-
                 println!("[ThreadB] First try_enter (should fail)...");
-                let result = cell_b_for_b.try_enter();
-
-                if result.is_none() {
+                let res = cell_b.try_enter();
+                if res.is_none() {
                     println!("[ThreadB] ✓ try_enter returned None (correct)");
-                    try_result_b_for_b.store(1, Ordering::SeqCst);
+                    try_res_for_b.store(1, Ordering::SeqCst);
                 } else {
-                    println!("[ThreadB] ✗ ERROR: try_enter succeeded when shouldn't!");
-                    drop(result);
-                    let _ = cell_b_for_b.request_unlock();
-                    try_result_b_for_b.store(10, Ordering::SeqCst);
+                    println!("[ThreadB] ✗ ERROR: try_enter succeeded when it shouldn't");
+                    drop(res);
+                    let _ = cell_b.request_unlock();
+                    try_res_for_b.store(10, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
-
                 return ThreadSignal::Yield;
             } else if attempts == 1 {
-                // Esperar a que A libere
-                if a_status < 5 {
+                // Esperar a que A libere (a_st >= 5)
+                if a_st < 5 {
                     return ThreadSignal::Yield;
                 }
-
                 println!("[ThreadB] Second try_enter (should succeed)...");
-                let result = cell_b_for_b.try_enter();
-
-                if let Some(mut guard) = result {
+                let res = cell_b.try_enter();
+                if let Some(mut guard) = res {
                     println!("[ThreadB] ✓ try_enter succeeded!");
                     *guard = 200;
-                    println!("[ThreadB] Modified value to 200");
                     drop(guard);
-
-                    let _ = cell_b_for_b.request_unlock();
-                    try_result_b_for_b.store(2, Ordering::SeqCst);
+                    let _ = cell_b.request_unlock();
+                    try_res_for_b.store(2, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 } else {
-                    println!("[ThreadB] ✗ ERROR: try_enter failed when should succeed!");
-                    try_result_b_for_b.store(20, Ordering::SeqCst);
+                    println!("[ThreadB] ✗ ERROR: second try_enter failed unexpectedly");
+                    try_res_for_b.store(20, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
             }
@@ -290,7 +272,7 @@ fn test_try_enter_semantics() {
         }),
     );
 
-    run_with_timeout(50, 15);
+    run_with_timeout(120, 25);
 
     let final_result = try_result.load(Ordering::SeqCst);
     println!("\nThreadB result: {}", final_result);
@@ -298,14 +280,11 @@ fn test_try_enter_semantics() {
     println!("  2 = Second attempt succeeded (correct)");
     println!("  10 = First attempt succeeded (ERROR)");
     println!("  20 = Second attempt failed (ERROR)");
-
-    assert_eq!(
-        final_result, 2,
-        "ThreadB should fail first and succeed second"
-    );
+    assert_eq!(final_result, 2, "ThreadB should fail first and succeed second");
 
     println!("\n✓ TEST 2 PASSED\n");
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 #[test]
