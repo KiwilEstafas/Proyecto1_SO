@@ -10,4 +10,5 @@ pub use model::*;
 pub use agents::*;
 pub use sim::*;
 pub use config::*;
-pub use sync::{SharedMutex, Shared, shared};
+pub use sync::{Shared, shared};
+

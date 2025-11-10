@@ -4,8 +4,7 @@
 
 use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
-use std::sync::Arc;
-use crate::sync::{SharedMutex, Shared};
+use crate::sync::Shared;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
@@ -62,10 +61,10 @@ pub struct Bridge {
     pub row: u32,
     pub capacity: u32,
 
-    // Estado protegido - CAMBIO: Ahora usa SharedMutex en lugar de std::sync::Mutex
+    // Estado protegido - usa Shared<MyMutexCell<...>>
     state: Shared<BridgeState>,
 
-    // Cola de espera con prioridades - CAMBIO: Ahora usa SharedMutex
+    // Cola de espera con prioridades - usa Shared<MyMutexCell<...>>
     wait_queue: Shared<BinaryHeap<WaitingVehicle>>,
 
     // Configuración específica
@@ -135,16 +134,16 @@ impl Bridge {
     }
 
     /// Actualizar el estado del puente (para semáforos)
-    /// 
+    ///
     /// NOTA: Esta función es llamada desde el hilo principal de simulación,
-    /// no desde hilos mypthreads, por lo que usamos try_lock
+    /// no desde hilos mypthreads, por lo que usamos try_enter
     pub fn update(&mut self, current_time_ms: u64) {
         if self.bridge_type != BridgeType::TrafficLight {
             return;
         }
 
-        // CAMBIO: Usar try_lock en lugar de lock() directo
-        if let Some(mut state) = self.state.try_lock() {
+        // Usar try_enter en lugar de lock() directo
+        if let Some(mut state) = self.state.try_enter() {
             if current_time_ms - state.last_light_change_ms >= self.light_cycle_ms {
                 // Cambiar el semáforo
                 state.light_state = match state.light_state {
@@ -158,91 +157,105 @@ impl Bridge {
                     self.id, state.light_state
                 );
             }
+            drop(state);
+            let _ = self.state.request_unlock();
         }
         // Si no pudimos adquirir el lock, simplemente continuamos
         // (el semáforo se actualizará en el siguiente tick)
     }
 
     /// Intentar cruzar el puente (vehículo)
-    /// 
+    ///
     /// IMPORTANTE: Esta función debe ser llamada desde hilos mypthreads
     /// Retorna true si el vehículo puede cruzar inmediatamente
     pub fn try_cross(&self, tid: ThreadId, priority: u8, direction: TrafficDirection) -> bool {
-        // CAMBIO: Usar try_lock en lugar de lock() porque estamos en un hilo mypthread
-        // y queremos evitar el ThreadSignal aquí
-        let Some(mut state) = self.state.try_lock() else {
-            // Si no podemos adquirir el lock, el hilo debe reintentar
-            return false;
-        };
-
-        // No se puede cruzar si hay un barco (esta regla es absoluta)
-        if state.boat_passing {
-            return false;
-        }
-
-        // --- REGLA DE PRIORIDAD ALTA ---
-        // Si un vehículo tiene alta prioridad (ej. > 50), intentará cruzar
-        // ignorando las reglas normales de tráfico (semáforos, ceda el paso).
-        if priority > 50 {
-            if state.vehicles_crossing < self.capacity {
-                println!(
-                    "[Puente {}] ¡ACCESO PRIORITARIO! Vehículo {} (prio:{}) cruzando.",
-                    self.id, tid, priority
-                );
-                state.vehicles_crossing += 1;
-                if state.vehicles_crossing == 1 {
-                    state.current_direction = Some(direction);
-                }
-                return true;
-            }
-        }
-
-        // --- LÓGICA NORMAL (para vehículos sin prioridad) ---
-        let can_cross = match self.bridge_type {
-            BridgeType::TrafficLight => {
-                let light_allows = match state.light_state {
-                    TrafficLightState::NorthGreen => direction == TrafficDirection::NorthToSouth,
-                    TrafficLightState::SouthGreen => direction == TrafficDirection::SouthToNorth,
-                };
-
-                light_allows && state.vehicles_crossing < self.capacity
+        // Usar try_enter (no bloqueante)
+        if let Some(mut state) = self.state.try_enter() {
+            // No se puede cruzar si hay un barco (esta regla es absoluta)
+            if state.boat_passing {
+                drop(state);
+                let _ = self.state.request_unlock();
+                return false;
             }
 
-            BridgeType::Yield => {
-                if state.vehicles_crossing >= self.capacity {
+            // --- REGLA DE PRIORIDAD ALTA ---
+            if priority > 50 {
+                if state.vehicles_crossing < self.capacity {
+                    println!(
+                        "[Puente {}] ¡ACCESO PRIORITARIO! Vehículo {} (prio:{}) cruzando.",
+                        self.id, tid, priority
+                    );
+                    state.vehicles_crossing += 1;
+                    if state.vehicles_crossing == 1 {
+                        state.current_direction = Some(direction);
+                    }
+                    drop(state);
+                    let _ = self.state.request_unlock();
+                    return true;
+                } else {
+                    drop(state);
+                    let _ = self.state.request_unlock();
                     return false;
                 }
+            }
 
-                if state.vehicles_crossing == 0 {
-                    true
-                } else {
-                    state.current_direction == Some(direction)
+            // --- LÓGICA NORMAL (para vehículos sin prioridad) ---
+            let can_cross = match self.bridge_type {
+                BridgeType::TrafficLight => {
+                    let light_allows = match state.light_state {
+                        TrafficLightState::NorthGreen => {
+                            direction == TrafficDirection::NorthToSouth
+                        }
+                        TrafficLightState::SouthGreen => {
+                            direction == TrafficDirection::SouthToNorth
+                        }
+                    };
+
+                    light_allows && state.vehicles_crossing < self.capacity
                 }
-            }
 
-            BridgeType::Drawbridge => {
-                state.vehicles_crossing < self.capacity
-                    && (state.vehicles_crossing == 0 || state.current_direction == Some(direction))
-            }
-        };
+                BridgeType::Yield => {
+                    if state.vehicles_crossing >= self.capacity {
+                        false
+                    } else if state.vehicles_crossing == 0 {
+                        true
+                    } else {
+                        state.current_direction == Some(direction)
+                    }
+                }
 
-        if can_cross {
-            state.vehicles_crossing += 1;
-            state.current_direction = Some(direction);
-            println!(
-                "[Puente {}] Vehículo {} cruzando (dir: {:?}, total: {})",
-                self.id, tid, direction, state.vehicles_crossing
-            );
-            true
+                BridgeType::Drawbridge => {
+                    state.vehicles_crossing < self.capacity
+                        && (state.vehicles_crossing == 0
+                            || state.current_direction == Some(direction))
+                }
+            };
+
+            if can_cross {
+                state.vehicles_crossing += 1;
+                state.current_direction = Some(direction);
+                println!(
+                    "[Puente {}] Vehículo {} cruzando (dir: {:?}, total: {})",
+                    self.id, tid, direction, state.vehicles_crossing
+                );
+                drop(state);
+                let _ = self.state.request_unlock();
+                true
+            } else {
+                drop(state);
+                let _ = self.state.request_unlock();
+                false
+            }
         } else {
+            // Si no podemos adquirir el lock, el hilo debe reintentar
             false
         }
     }
 
     /// Salir del puente (vehículo)
     pub fn exit_bridge(&self, tid: ThreadId) {
-        // CAMBIO: Usar try_lock
-        if let Some(mut state) = self.state.try_lock() {
+        // Usar try_enter
+        if let Some(mut state) = self.state.try_enter() {
             if state.vehicles_crossing > 0 {
                 state.vehicles_crossing -= 1;
                 println!(
@@ -254,6 +267,8 @@ impl Bridge {
                     state.current_direction = None;
                 }
             }
+            drop(state);
+            let _ = self.state.request_unlock();
         }
     }
 
@@ -263,18 +278,21 @@ impl Bridge {
             return false;
         }
 
-        // CAMBIO: Usar try_lock
-        let Some(mut state) = self.state.try_lock() else {
-            return false;
-        };
-
-        if state.vehicles_crossing == 0 && !state.boat_passing {
-            state.boat_passing = true;
-            println!(
-                "[Puente {}] Barco comenzando a pasar, puente levadizo ARRIBA",
-                self.id
-            );
-            true
+        // Usar try_enter
+        if let Some(mut state) = self.state.try_enter() {
+            let ok = if state.vehicles_crossing == 0 && !state.boat_passing {
+                state.boat_passing = true;
+                println!(
+                    "[Puente {}] Barco comenzando a pasar, puente levadizo ARRIBA",
+                    self.id
+                );
+                true
+            } else {
+                false
+            };
+            drop(state);
+            let _ = self.state.request_unlock();
+            ok
         } else {
             false
         }
@@ -282,13 +300,16 @@ impl Bridge {
 
     /// Un barco termina de pasar
     pub fn boat_exit(&self) {
-        // CAMBIO: Usar try_lock
-        if let Some(mut state) = self.state.try_lock() {
+        // Usar try_enter
+        if let Some(mut state) = self.state.try_enter() {
             state.boat_passing = false;
             println!(
                 "[Puente {}] Barco terminó de pasar, puente levadizo ABAJO",
                 self.id
             );
+            drop(state);
+            let _ = self.state.request_unlock();
         }
     }
 }
+

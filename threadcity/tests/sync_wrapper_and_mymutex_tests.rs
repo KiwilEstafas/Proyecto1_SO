@@ -6,7 +6,7 @@
 
 use mypthreads::mypthreads_api::*;
 use mypthreads::signals::ThreadSignal;
-use mypthreads::thread::ThreadId;
+// use mypthreads::thread::ThreadId; // <- no se usa
 use threadcity::sync::{shared, Shared, MyMutexCell};
 
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
@@ -50,18 +50,11 @@ fn timed_out(dl: Instant) -> bool {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 1: request_lock requiere contexto de hilo inicializado
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_request_lock_requires_thread_context() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
     println!("║ TEST 1: request_lock requiere contexto de hilo           ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
-
-    // Qué valida: request_lock (que usa my_mutex_lock internamente) debe
-    // requerir un contexto de hilo inicializado. Si se llama desde fuera
-    // de un hilo mypthread, debería fallar.
 
     let cell = Arc::new(MyMutexCell::new(42));
 
@@ -91,7 +84,7 @@ fn test_request_lock_requires_thread_context() {
     my_thread_create(
         "LockUser",
         SchedulerParams::RoundRobin,
-        Box::new(move |tid, _tickets| {
+        Box::new(move |_tid, _tickets| {
             let status = success_clone.load(Ordering::SeqCst);
             println!("[LockUser] Status: {}", status);
 
@@ -137,11 +130,7 @@ fn test_request_lock_requires_thread_context() {
                 3 => {
                     // Paso 3: Liberar lock
                     println!("[LockUser] Requesting unlock...");
-                    let signal = cell_clone.request_unlock();
-                    println!("[LockUser] Unlock signal: {:?}", signal);
-
-                    success_clone.store(4, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
+                    return cell_clone.request_unlock();
                 }
                 _ => return ThreadSignal::Exit,
             }
@@ -168,8 +157,8 @@ fn test_request_lock_requires_thread_context() {
     if let Some(guard) = cell.try_enter() {
         let value = *guard;
         drop(guard);
-        cell.request_unlock();
-        
+        let _ = cell.request_unlock();
+
         println!("\nFinal value: {}", value);
         assert_eq!(value, 43, "Value should have been incremented");
     }
@@ -178,9 +167,6 @@ fn test_request_lock_requires_thread_context() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 2: Semántica de try_enter
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_try_enter_semantics() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
@@ -194,18 +180,18 @@ fn test_try_enter_semantics() {
 
     let cell_a = cell.clone();
     let has_lock = Arc::new(AtomicU32::new(0));
-    let has_lock_a = has_lock.clone();
+    let has_lock_a_for_a = has_lock.clone();
 
     let cell_b = cell.clone();
     let try_result = Arc::new(AtomicU32::new(0));
-    let try_result_b = try_result.clone();
+    let try_result_b_for_a = try_result.clone();
 
     // Thread A: toma el lock y lo mantiene
     my_thread_create(
         "ThreadA",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let status = has_lock_a.load(Ordering::SeqCst);
+            let status = has_lock_a_for_a.load(Ordering::SeqCst);
 
             match status {
                 0 => {
@@ -214,11 +200,11 @@ fn test_try_enter_semantics() {
 
                     match signal {
                         ThreadSignal::MutexLock(_) => {
-                            has_lock_a.store(1, Ordering::SeqCst);
+                            has_lock_a_for_a.store(1, Ordering::SeqCst);
                             return signal;
                         }
                         ThreadSignal::Continue => {
-                            has_lock_a.store(2, Ordering::SeqCst);
+                            has_lock_a_for_a.store(2, Ordering::SeqCst);
                             return ThreadSignal::Yield;
                         }
                         _ => return signal,
@@ -228,35 +214,38 @@ fn test_try_enter_semantics() {
                     println!("[ThreadA] Holding lock...");
                     let _guard = cell_a.enter();
                     // Mantener el lock por varios ciclos
-                    has_lock_a.store(3, Ordering::SeqCst);
-                    
+                    has_lock_a_for_a.store(3, Ordering::SeqCst);
+
                     // Esperar a que B intente
-                    if try_result_b.load(Ordering::SeqCst) == 0 {
+                    if try_result_b_for_a.load(Ordering::SeqCst) == 0 {
                         return ThreadSignal::Yield;
                     }
-                    
+
                     drop(_guard);
-                    has_lock_a.store(4, Ordering::SeqCst);
+                    has_lock_a_for_a.store(4, Ordering::SeqCst);
                     return ThreadSignal::Yield;
                 }
                 4 => {
                     println!("[ThreadA] Releasing lock...");
-                    let signal = cell_a.request_unlock();
-                    has_lock_a.store(5, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
+                    has_lock_a_for_a.store(5, Ordering::SeqCst);
+                    return cell_a.request_unlock();
                 }
                 _ => return ThreadSignal::Yield,
             }
         }),
     );
 
-    // Thread B: intenta try_enter
+    // Thread B: intenta try_enter (usa clones distintos)
+    let has_lock_a_for_b = has_lock.clone();
+    let try_result_b_for_b = try_result.clone();
+    let cell_b_for_b = cell.clone();
+
     my_thread_create(
         "ThreadB",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let attempts = try_result_b.load(Ordering::SeqCst);
-            let a_status = has_lock_a.load(Ordering::SeqCst);
+            let attempts = try_result_b_for_b.load(Ordering::SeqCst);
+            let a_status = has_lock_a_for_b.load(Ordering::SeqCst);
 
             if attempts == 0 {
                 // Esperar a que A tome el lock
@@ -265,16 +254,16 @@ fn test_try_enter_semantics() {
                 }
 
                 println!("[ThreadB] First try_enter (should fail)...");
-                let result = cell_b.try_enter();
+                let result = cell_b_for_b.try_enter();
 
                 if result.is_none() {
                     println!("[ThreadB] ✓ try_enter returned None (correct)");
-                    try_result_b.store(1, Ordering::SeqCst);
+                    try_result_b_for_b.store(1, Ordering::SeqCst);
                 } else {
                     println!("[ThreadB] ✗ ERROR: try_enter succeeded when shouldn't!");
                     drop(result);
-                    cell_b.request_unlock();
-                    try_result_b.store(10, Ordering::SeqCst);
+                    let _ = cell_b_for_b.request_unlock();
+                    try_result_b_for_b.store(10, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
 
@@ -286,20 +275,20 @@ fn test_try_enter_semantics() {
                 }
 
                 println!("[ThreadB] Second try_enter (should succeed)...");
-                let result = cell_b.try_enter();
+                let result = cell_b_for_b.try_enter();
 
                 if let Some(mut guard) = result {
                     println!("[ThreadB] ✓ try_enter succeeded!");
                     *guard = 200;
                     println!("[ThreadB] Modified value to 200");
                     drop(guard);
-                    
-                    cell_b.request_unlock();
-                    try_result_b.store(2, Ordering::SeqCst);
+
+                    let _ = cell_b_for_b.request_unlock();
+                    try_result_b_for_b.store(2, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 } else {
                     println!("[ThreadB] ✗ ERROR: try_enter failed when should succeed!");
-                    try_result_b.store(20, Ordering::SeqCst);
+                    try_result_b_for_b.store(20, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
             }
@@ -326,17 +315,11 @@ fn test_try_enter_semantics() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 3: Orden de lock/unlock roundtrip
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_lock_unlock_roundtrip_order() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
     println!("║ TEST 3: Orden de lock/unlock roundtrip                   ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
-
-    // Qué valida: Cada request_lock es seguido por request_unlock;
-    // las cuentas coinciden.
 
     const ITERATIONS: usize = 5;
 
@@ -408,10 +391,9 @@ fn test_lock_unlock_roundtrip_order() {
 
                         // Ahora liberar
                         println!("[RoundtripThread] Releasing lock #{}...", current_unlocks + 1);
-                        let signal = cell_clone.request_unlock();
                         unlocks.fetch_add(1, Ordering::SeqCst);
                         state_clone.store(State::NeedLock as u32, Ordering::SeqCst);
-                        return signal;
+                        return cell_clone.request_unlock();
                     } else {
                         // Aún no hemos registrado el lock, esperar
                         locks.fetch_add(1, Ordering::SeqCst);
@@ -439,8 +421,8 @@ fn test_lock_unlock_roundtrip_order() {
     if let Some(guard) = cell.try_enter() {
         let value = *guard;
         drop(guard);
-        cell.request_unlock();
-        
+        let _ = cell.request_unlock();
+
         println!("Final cell value: {}", value);
         assert_eq!(value, ITERATIONS as i32, "Value should match iteration count");
     }
@@ -449,16 +431,11 @@ fn test_lock_unlock_roundtrip_order() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 4: Exclusión mutua en contador compartido
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_mutual_exclusion_on_shared_counter() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
     println!("║ TEST 4: Exclusión mutua en contador compartido           ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
-
-    // Qué valida: Exclusión mutua real con N hilos incrementando un contador M veces
 
     const NUM_THREADS: usize = 3;
     const INCREMENTS_PER_THREAD: usize = 4;
@@ -524,10 +501,9 @@ fn test_mutual_exclusion_on_shared_counter() {
                         drop(guard);
 
                         // Unlock
-                        let signal = cell_clone.request_unlock();
                         my_inc_clone.fetch_add(1, Ordering::SeqCst);
                         state_clone.store(WorkerState::NeedLock as u32, Ordering::SeqCst);
-                        return signal;
+                        return cell_clone.request_unlock();
                     }
                     _ => return ThreadSignal::Exit,
                 }
@@ -544,7 +520,7 @@ fn test_mutual_exclusion_on_shared_counter() {
     if let Some(guard) = cell.try_enter() {
         let final_value = *guard;
         drop(guard);
-        cell.request_unlock();
+        let _ = cell.request_unlock();
 
         let expected = NUM_THREADS * INCREMENTS_PER_THREAD;
 
@@ -564,9 +540,6 @@ fn test_mutual_exclusion_on_shared_counter() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 5: Guard no hace unlock en Drop
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_guard_scope_no_unlock() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
@@ -574,25 +547,23 @@ fn test_guard_scope_no_unlock() {
     println!("╚═══════════════════════════════════════════════════════════╝\n");
 
     // Qué valida: El MyGuard no desbloquea en Drop.
-    // Hilo A toma lock, sale del scope del guard sin unlock,
-    // y B intenta try_enter → debe dar None.
 
     let cell: Shared<i32> = shared(42);
 
     let cell_a = cell.clone();
     let a_status = Arc::new(AtomicU32::new(0));
-    let a_status_clone = a_status.clone();
+    let a_status_for_a = a_status.clone();
 
     let cell_b = cell.clone();
     let b_result = Arc::new(AtomicU32::new(0));
-    let b_result_clone = b_result.clone();
+    let b_result_for_a = b_result.clone();
 
     // Thread A: toma lock, deja salir guard de scope, pero NO unlock
     my_thread_create(
         "ThreadA",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let status = a_status_clone.load(Ordering::SeqCst);
+            let status = a_status_for_a.load(Ordering::SeqCst);
 
             match status {
                 0 => {
@@ -601,11 +572,11 @@ fn test_guard_scope_no_unlock() {
 
                     match signal {
                         ThreadSignal::MutexLock(_) => {
-                            a_status_clone.store(1, Ordering::SeqCst);
+                            a_status_for_a.store(1, Ordering::SeqCst);
                             return signal;
                         }
                         ThreadSignal::Continue => {
-                            a_status_clone.store(2, Ordering::SeqCst);
+                            a_status_for_a.store(2, Ordering::SeqCst);
                             return ThreadSignal::Yield;
                         }
                         _ => return signal,
@@ -616,41 +587,44 @@ fn test_guard_scope_no_unlock() {
                     {
                         let _guard = cell_a.enter();
                         println!("[ThreadA] Have guard, letting it drop...");
-                        // Guard sale de scope aquí, pero NO debe hacer unlock
+                        // Guard sale de scope aquí, pero NO hace unlock
                     }
                     println!("[ThreadA] Guard dropped (but lock still held)");
-                    a_status_clone.store(3, Ordering::SeqCst);
-                    
+                    a_status_for_a.store(3, Ordering::SeqCst);
+
                     // Esperar a que B intente
-                    if b_result_clone.load(Ordering::SeqCst) == 0 {
+                    if b_result_for_a.load(Ordering::SeqCst) == 0 {
                         return ThreadSignal::Yield;
                     }
-                    
+
                     return ThreadSignal::Yield;
                 }
                 3 => {
-                    // Ahora sí hacer unlock explícito
-                    if b_result_clone.load(Ordering::SeqCst) < 2 {
+                    // Ahora sí hacer unlock explícito cuando B haya intentado
+                    if b_result_for_a.load(Ordering::SeqCst) < 2 {
                         return ThreadSignal::Yield;
                     }
-                    
+
                     println!("[ThreadA] Now explicitly unlocking...");
-                    let signal = cell_a.request_unlock();
-                    a_status_clone.store(4, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
+                    a_status_for_a.store(4, Ordering::SeqCst);
+                    return cell_a.request_unlock();
                 }
                 _ => return ThreadSignal::Yield,
             }
         }),
     );
 
-    // Thread B: intenta try_enter
+    // Thread B: intenta try_enter (clones separados)
+    let a_status_for_b = a_status.clone();
+    let b_result_for_b = b_result.clone();
+    let cell_b_for_b = cell.clone();
+
     my_thread_create(
         "ThreadB",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let attempts = b_result_clone.load(Ordering::SeqCst);
-            let a_stat = a_status_clone.load(Ordering::SeqCst);
+            let attempts = b_result_for_b.load(Ordering::SeqCst);
+            let a_stat = a_status_for_b.load(Ordering::SeqCst);
 
             if attempts == 0 {
                 // Esperar a que A deje salir el guard de scope
@@ -659,41 +633,41 @@ fn test_guard_scope_no_unlock() {
                 }
 
                 println!("[ThreadB] First try_enter (should fail, A still has lock)...");
-                let result = cell_b.try_enter();
+                let result = cell_b_for_b.try_enter();
 
                 if result.is_none() {
                     println!("[ThreadB] ✓ try_enter failed (correct, guard Drop didn't unlock)");
-                    b_result_clone.store(1, Ordering::SeqCst);
+                    b_result_for_b.store(1, Ordering::SeqCst);
                 } else {
                     println!("[ThreadB] ✗ ERROR: Got lock when A should still have it!");
                     drop(result);
-                    cell_b.request_unlock();
-                    b_result_clone.store(10, Ordering::SeqCst);
+                    let _ = cell_b_for_b.request_unlock();
+                    b_result_for_b.store(10, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
 
                 return ThreadSignal::Yield;
             } else if attempts == 1 {
                 // Señalar que estamos listos para que A haga unlock
-                b_result_clone.store(2, Ordering::SeqCst);
-                
+                b_result_for_b.store(2, Ordering::SeqCst);
+
                 // Esperar a que A haga unlock explícito
                 if a_stat < 4 {
                     return ThreadSignal::Yield;
                 }
 
                 println!("[ThreadB] Second try_enter (should succeed now)...");
-                let result = cell_b.try_enter();
+                let result = cell_b_for_b.try_enter();
 
                 if let Some(guard) = result {
                     println!("[ThreadB] ✓ try_enter succeeded after explicit unlock!");
                     drop(guard);
-                    cell_b.request_unlock();
-                    b_result_clone.store(3, Ordering::SeqCst);
+                    let _ = cell_b_for_b.request_unlock();
+                    b_result_for_b.store(3, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 } else {
                     println!("[ThreadB] ✗ ERROR: Failed to get lock after A unlocked!");
-                    b_result_clone.store(20, Ordering::SeqCst);
+                    b_result_for_b.store(20, Ordering::SeqCst);
                     return ThreadSignal::Exit;
                 }
             }
@@ -721,9 +695,6 @@ fn test_guard_scope_no_unlock() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// TEST 6: No hay solapamiento en sección crítica
-// ═══════════════════════════════════════════════════════════════════════════
-
 #[test]
 fn test_no_overlap_within_critical_section() {
     println!("\n╔═══════════════════════════════════════════════════════════╗");
@@ -823,9 +794,8 @@ fn test_no_overlap_within_critical_section() {
                         println!("[Thread-{}] EXITING critical section (remaining: {})", i, remaining);
 
                         // Unlock
-                        let signal = cell_clone.request_unlock();
                         state_clone.store(State::Done as u32, Ordering::SeqCst);
-                        return ThreadSignal::Exit;
+                        return cell_clone.request_unlock();
                     }
                     _ => return ThreadSignal::Exit,
                 }
@@ -853,3 +823,4 @@ fn test_no_overlap_within_critical_section() {
 
     println!("\n✓ TEST 6 PASSED: No solapamiento detectado\n");
 }
+
