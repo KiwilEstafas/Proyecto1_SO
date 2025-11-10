@@ -85,7 +85,7 @@ pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
 // --- my_thread_get_tickets HA SIDO ELIMINADA para evitar deadlocks ---
 
 pub struct MyMutex {
-    internal: SimpleMutex,
+    pub internal: SimpleMutex,
 }
 
 //Inicia un mutex

@@ -1,13 +1,3 @@
-// threadcity/src/sync.rs
-//
-// Wrapper sobre MyMutex que respeta el contrato de ThreadSignal.
-//
-// REGLA FUNDAMENTAL: Los métodos que invocan my_mutex_lock/unlock DEBEN
-// retornar ThreadSignal al caller, quien debe devolverlo al runtime.
-// NO usamos RAII (Drop) para unlock porque eso perdería el ThreadSignal.
-
-// --- CAMBIOS CLAVE AQUÍ ---
-// Se ha cambiado `mypthreads::` por `crate::`
 use crate::mypthreads_api::{
     my_mutex_destroy, my_mutex_init, my_mutex_lock, my_mutex_trylock, my_mutex_unlock, MyMutex,
 };
@@ -16,6 +6,7 @@ use crate::signals::ThreadSignal;
 
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
+use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 /// Contenedor thread-safe para datos compartidos usando MyMutex.
@@ -56,6 +47,15 @@ impl<T> MyMutexCell<T> {
     ///   puede proceder a llamar `enter()`.
     pub fn request_lock(&self) -> ThreadSignal {
         my_mutex_lock(&self.mtx)
+    }
+
+    /// Libera el lock directamente.
+    ///
+    /// IMPORTANTE: Esta función es SÓLO para ser usada por el hilo `main`.
+    /// Bypassea el sistema de señales porque el `main` no es un hilo gestionado.
+    /// Asume que el `main` thread tiene el tid `0`.
+    pub fn force_unlock_for_main(&self) {
+        self.mtx.internal.force_unlock();
     }
 
     /// Paso 2: Entrar a la sección crítica (después de que el runtime otorgó el lock).

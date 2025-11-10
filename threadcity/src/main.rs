@@ -1,5 +1,5 @@
 // threadcity/src/main.rs
-// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
+// VERSIÓN FINAL CORREGIDA
 
 // --- IMPORTACIONES ---
 use mypthreads::{
@@ -25,7 +25,7 @@ fn get_next_agent_id() -> u32 {
 fn main() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║           ThreadCity - Simulación Preemptiva              ║");
-    println!("║          [REFACTORIZADO: Usando MyMutex]                  ║");
+    println!("║          [CORREGIDO: Usando force_unlock_for_main]        ║");
     println!("╚════════════════════════════════════════════════════════════╝\n");
 
     // --- SETUP ---
@@ -33,7 +33,6 @@ fn main() {
     let shared_city = create_shared_city(city);
 
     // --- CONTADORES TOTALES ---
-    // NOTA: AtomicU32 no necesita mutex, se mantiene igual
     let total_cars = std::sync::Arc::new(AtomicU32::new(0));
     let total_ambulances = std::sync::Arc::new(AtomicU32::new(0));
     let total_trucks = std::sync::Arc::new(AtomicU32::new(0));
@@ -80,7 +79,7 @@ fn main() {
     // --- PARÁMETROS DE SIMULACIÓN ---
     const SIMULATION_STEPS: u32 = 100;
     const TIME_PER_STEP_MS: u64 = 500;
-    const SCHEDULER_CYCLES_PER_STEP: usize = 10;
+    const SCHEDULER_CYCLES_PER_STEP: usize = 20; // Aumentado para dar más tiempo a los hilos
     println!(
         "Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n",
         SIMULATION_STEPS, TIME_PER_STEP_MS
@@ -88,14 +87,11 @@ fn main() {
 
     // --- BUCLE PRINCIPAL DE SIMULACIÓN ---
     for step in 0..SIMULATION_STEPS {
-        // CAMBIO: Usar try_enter (no bloqueante) con retry desde el hilo principal
         let new_agents = {
-            // Intentar adquirir el lock, si no se puede, esperar un poco y reintentar
             let mut city_lock = loop {
                 if let Some(lock) = shared_city.try_enter() {
                     break lock;
                 }
-                // Si no pudimos adquirir el lock, dar tiempo a los hilos
                 thread::sleep(Duration::from_micros(100));
             };
 
@@ -108,7 +104,7 @@ fn main() {
             );
             let agents = city_lock.update_spawner();
             drop(city_lock);
-            let _ = shared_city.request_unlock();
+            shared_city.force_unlock_for_main();
             agents
         };
 
@@ -139,7 +135,6 @@ fn main() {
 
         {
             let tids_to_promote: Vec<u32> = {
-                // CAMBIO: Usar try_enter con retry
                 let city_lock = loop {
                     if let Some(lock) = shared_city.try_enter() {
                         break lock;
@@ -166,11 +161,14 @@ fn main() {
                     }
                 }
                 drop(city_lock);
-                let _ = shared_city.request_unlock();
+                shared_city.force_unlock_for_main();
                 tids
             };
             for tid in tids_to_promote {
-                println!("📢 ¡Activando protocolo de emergencia para el Hilo {}!", tid);
+                println!(
+                    "📢 ¡Activando protocolo de emergencia para el Hilo {}!",
+                    tid
+                );
                 my_thread_chsched(tid, SchedulerParams::Lottery { tickets: 1000 });
             }
         }
@@ -204,13 +202,8 @@ fn main() {
 }
 
 // --- FUNCIONES SPAWN ---
-
-fn spawn_car(
-    id: u32,
-    layout: &CityLayout,
-    city: &SharedCity,
-    counter: std::sync::Arc<AtomicU32>,
-) {
+// (Estas funciones no necesitan cambios)
+fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::sync::Arc<AtomicU32>) {
     counter.fetch_add(1, Ordering::Relaxed);
     let mut rng = rng();
     let origin = random_position(&mut rng, layout);
@@ -246,12 +239,11 @@ fn spawn_car(
         agent_type: AgentType::Car,
     };
 
-    // CAMBIO: Usar try_enter con retry para insertar el agente
     loop {
         if let Some(mut city_lock) = city.try_enter() {
             city_lock.agents.insert(tid, agent_info);
             drop(city_lock);
-            let _ = city.request_unlock();
+            city.force_unlock_for_main();
             break;
         }
         thread::sleep(Duration::from_micros(50));
@@ -300,12 +292,11 @@ fn spawn_ambulance(
         agent_type: AgentType::Ambulance,
     };
 
-    // CAMBIO: Usar try_enter con retry
     loop {
         if let Some(mut city_lock) = city.try_enter() {
             city_lock.agents.insert(tid, agent_info);
             drop(city_lock);
-            let _ = city.request_unlock();
+            city.force_unlock_for_main();
             break;
         }
         thread::sleep(Duration::from_micros(50));
@@ -326,7 +317,6 @@ fn spawn_cargo_truck(
     let deadline: u64;
 
     {
-        // CAMBIO: Usar try_enter con retry
         let city_lock = loop {
             if let Some(lock) = city.try_enter() {
                 break lock;
@@ -348,7 +338,7 @@ fn spawn_cargo_truck(
         deadline = city_lock.current_time() + supply_spec.deadline_ms;
 
         drop(city_lock);
-        let _ = city.request_unlock();
+        city.force_unlock_for_main();
     }
 
     let city_clone = city.clone();
@@ -393,24 +383,18 @@ fn spawn_cargo_truck(
         agent_type: AgentType::CargoTruck(cargo),
     };
 
-    // CAMBIO: Usar try_enter con retry
     loop {
         if let Some(mut city_lock) = city.try_enter() {
             city_lock.agents.insert(tid, agent_info);
             drop(city_lock);
-            let _ = city.request_unlock();
+            city.force_unlock_for_main();
             break;
         }
         thread::sleep(Duration::from_micros(50));
     }
 }
 
-fn spawn_boat(
-    id: u32,
-    layout: &CityLayout,
-    city: &SharedCity,
-    counter: std::sync::Arc<AtomicU32>,
-) {
+fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::sync::Arc<AtomicU32>) {
     counter.fetch_add(1, Ordering::Relaxed);
     let city_clone = city.clone();
     let layout_clone = layout.clone();
@@ -445,12 +429,11 @@ fn spawn_boat(
         agent_type: AgentType::Boat,
     };
 
-    // CAMBIO: Usar try_enter con retry
     loop {
         if let Some(mut city_lock) = city.try_enter() {
             city_lock.agents.insert(tid, agent_info);
             drop(city_lock);
-            let _ = city.request_unlock();
+            city.force_unlock_for_main();
             break;
         }
         thread::sleep(Duration::from_micros(50));
@@ -458,15 +441,6 @@ fn spawn_boat(
 }
 
 // --- LÓGICA DE AGENTES Y HELPERS ---
-
-fn random_supply_kind(rng: &mut impl Rng) -> SupplyKind {
-    if rng.random_bool(0.5) {
-        SupplyKind::Radioactive
-    } else {
-        SupplyKind::Water
-    }
-}
-
 fn vehicle_logic(
     tid: ThreadId,
     id: u32,
@@ -488,58 +462,59 @@ fn vehicle_logic(
             }
             let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
                 || (pos.y > layout.river_column && dest.y < layout.river_column);
-            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column)
+            let at_bridge_entrance = (pos.y == layout.river_column - 1
+                && dest.y > layout.river_column)
                 || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
 
             if needs_bridge && at_bridge_entrance {
                 println!("[{}] 🚦 En entrada de puente", id);
                 *state = AgentState::WaitingForBridge;
-                return ThreadSignal::Yield;
+            } else {
+                move_towards(pos, dest, layout);
             }
-            move_towards(pos, dest, layout);
             ThreadSignal::Yield
         }
         AgentState::WaitingForBridge => {
-            let scheduler_bonus = current_tickets;
-
-            // CAMBIO: Usar try_enter - si no podemos acceder, bloqueamos el hilo
-            let Some(city_lock) = city.try_enter() else {
-                return ThreadSignal::Block;
+            let city_lock = match city.try_enter() {
+                Some(lock) => lock,
+                None => return ThreadSignal::Block, // No pude obtener el lock, me bloqueo.
             };
 
             let bridge_id = nearest_bridge(layout, pos.x);
             let bridge = city_lock
                 .get_bridge(bridge_id)
                 .expect("Puente no encontrado");
-
-            let base_priority = match agent_type {
-                AgentType::Ambulance => 100,
-                _ => 0,
-            };
-            let final_priority = base_priority + scheduler_bonus as u8;
             let direction = if pos.y < layout.river_column {
                 TrafficDirection::NorthToSouth
             } else {
                 TrafficDirection::SouthToNorth
             };
+            let mut can_cross = false;
 
             if agent_type == AgentType::Ambulance {
                 println!("[{}] 🚑 AMBULANCIA pasando directamente", id);
-                *state = AgentState::CrossingBridge;
-                *crossing_steps = 0;
-                drop(city_lock);
-                return ThreadSignal::Yield;
-            }
-            if bridge.try_cross(tid, final_priority, direction) {
-                println!("[{}] Comenzó a cruzar puente {}", id, bridge_id);
-                *state = AgentState::CrossingBridge;
-                *crossing_steps = 0;
-                drop(city_lock);
-                ThreadSignal::Continue
+                can_cross = true;
             } else {
-                drop(city_lock);
-                ThreadSignal::Block
+                let base_priority = 0;
+                let final_priority = base_priority + current_tickets as u8;
+                if bridge.try_cross(tid, final_priority, direction) {
+                    println!("[{}] Comenzó a cruzar puente {}", id, bridge_id);
+                    can_cross = true;
+                }
             }
+
+            if can_cross {
+                *state = AgentState::CrossingBridge;
+                *crossing_steps = 0;
+            }
+
+            // La acción final de este turno es SIEMPRE liberar el lock.
+            // El runtime nos pondrá de nuevo en la cola de listos.
+            // Si no pudimos cruzar, seguiremos en `WaitingForBridge` y reintentaremos.
+
+            drop(city_lock);
+            city.force_unlock_for_main();
+            return ThreadSignal::Yield;
         }
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
@@ -550,21 +525,27 @@ fn vehicle_logic(
                     pos.y = layout.river_column - 1;
                 }
 
-                // CAMBIO: Usar try_enter
-                if let Some(city_lock) = city.try_enter() {
-                    let bridge_id = nearest_bridge(layout, pos.x);
-                    let bridge = city_lock
-                        .get_bridge(bridge_id)
-                        .expect("Puente no encontrado");
+                println!("[{}] Cruzó el puente, pos: {:?}", id, pos);
+                *state = AgentState::Traveling;
+
+                // Notificar al puente es una acción crítica.
+                let city_lock = match city.try_enter() {
+                    Some(lock) => lock,
+                    // Si no puedo notificar ahora, lo intentaré en el siguiente ciclo.
+                    // No es ideal, pero no causa deadlock.
+                    None => return ThreadSignal::Yield,
+                };
+
+                let bridge_id = nearest_bridge(layout, pos.x);
+                if let Some(bridge) = city_lock.get_bridge(bridge_id) {
                     if agent_type != AgentType::Ambulance {
                         bridge.exit_bridge(tid);
                     }
-                    drop(city_lock);
-                    let _ = city.request_unlock();
                 }
 
-                println!("[{}] Cruzó el puente, pos: {:?}", id, pos);
-                *state = AgentState::Traveling;
+                drop(city_lock);
+                city.force_unlock_for_main();
+                return ThreadSignal::Yield;
             }
             ThreadSignal::Yield
         }
@@ -584,43 +565,37 @@ fn cargo_truck_logic(
     city: &SharedCity,
     layout: &CityLayout,
 ) -> ThreadSignal {
-    match *state {
-        AgentState::Traveling => {
-            if pos.x == dest.x && pos.y == dest.y {
-                // CAMBIO: Usar try_enter
-                if let Some(mut city_lock) = city.try_enter() {
-                    let current_time = city_lock.current_time();
-                    if let Some(plant) = city_lock.find_plant_at(dest) {
-                        let supply = plant
-                            .requires
-                            .iter()
-                            .find(|s| s.kind == cargo)
-                            .expect("Suministro no requerido")
-                            .clone();
-                        plant.commit_delivery(supply, current_time);
-                        println!(
-                            "[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}",
-                            id, cargo, dest
-                        );
-                    }
-                    drop(city_lock);
-                    let _ = city.request_unlock();
-                }
-                *state = AgentState::Arrived;
-                return ThreadSignal::Exit;
-            }
-            let needs_bridge = (pos.y < layout.river_column && dest.y > layout.river_column)
-                || (pos.y > layout.river_column && dest.y < layout.river_column);
-            let at_bridge_entrance = (pos.y == layout.river_column - 1 && dest.y > layout.river_column)
-                || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
-            if needs_bridge && at_bridge_entrance {
-                *state = AgentState::WaitingForBridge;
-                return ThreadSignal::Yield;
-            }
-            move_towards(pos, dest, layout);
-            ThreadSignal::Yield
+    if *state != AgentState::Arrived && pos.x == dest.x && pos.y == dest.y {
+        let mut city_lock = match city.try_enter() {
+            Some(lock) => lock,
+            None => return ThreadSignal::Block,
+        };
+
+        let current_time = city_lock.current_time();
+        if let Some(plant) = city_lock.find_plant_at(dest) {
+            let supply = plant
+                .requires
+                .iter()
+                .find(|s| s.kind == cargo)
+                .expect("Suministro no requerido")
+                .clone();
+            plant.commit_delivery(supply, current_time);
+            println!(
+                "[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}",
+                id, cargo, dest
+            );
         }
-        AgentState::WaitingForBridge | AgentState::CrossingBridge => vehicle_logic(
+
+        *state = AgentState::Arrived;
+
+        drop(city_lock);
+        city.force_unlock_for_main();
+        return ThreadSignal::Yield;
+    }
+
+    match *state {
+        AgentState::Arrived => ThreadSignal::Exit,
+        _ => vehicle_logic(
             tid,
             id,
             AgentType::CargoTruck(cargo),
@@ -632,7 +607,6 @@ fn cargo_truck_logic(
             city,
             layout,
         ),
-        AgentState::Arrived => ThreadSignal::Exit,
     }
 }
 
@@ -656,44 +630,48 @@ fn boat_logic(
             }
             if pos.x == layout.bridge3_row {
                 *state = AgentState::WaitingForBridge;
-                return ThreadSignal::Yield;
-            }
-            if pos.x < dest.x {
+            } else if pos.x < dest.x {
                 pos.x += 1;
             }
             ThreadSignal::Yield
         }
         AgentState::WaitingForBridge => {
-            // CAMBIO: Usar try_enter
-            let Some(city_lock) = city.try_enter() else {
-                return ThreadSignal::Block;
+            let city_lock = match city.try_enter() {
+                Some(lock) => lock,
+                None => return ThreadSignal::Block,
             };
 
             let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
-            if bridge.boat_request_pass() {
+            let can_cross = bridge.boat_request_pass();
+
+            if can_cross {
                 println!("[Boat-{}] ⛵ Puente levadizo levantado, pasando", id);
                 *state = AgentState::CrossingBridge;
                 *crossing_steps = 0;
-                drop(city_lock);
-                ThreadSignal::Continue
-            } else {
-                drop(city_lock);
-                ThreadSignal::Block
             }
+
+            drop(city_lock);
+            city.force_unlock_for_main();  // ✅ CAMBIADO
+            return ThreadSignal::Yield;     // ✅ CAMBIADO
         }
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
             if *crossing_steps >= 5 {
-                // CAMBIO: Usar try_enter
-                if let Some(city_lock) = city.try_enter() {
-                    let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
-                    bridge.boat_exit();
-                    drop(city_lock);
-                    let _ = city.request_unlock();
-                }
                 pos.x += 1;
                 println!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
+
+                let city_lock = match city.try_enter() {
+                    Some(lock) => lock,
+                    None => return ThreadSignal::Yield,
+                };
+
+                let bridge = city_lock.get_bridge(3).expect("Puente 3 no encontrado");
+                bridge.boat_exit();
+
+                drop(city_lock);
+                city.force_unlock_for_main();
+                return ThreadSignal::Yield;
             }
             ThreadSignal::Yield
         }
@@ -701,6 +679,7 @@ fn boat_logic(
     }
 }
 
+// CORRECCIÓN: Función añadida de nuevo
 fn move_towards(pos: &mut Coord, dest: Coord, layout: &CityLayout) {
     if pos.y != layout.river_column {
         if pos.y < dest.y && pos.y + 1 != layout.river_column {
@@ -737,3 +716,10 @@ fn random_destination(rng: &mut impl Rng, layout: &CityLayout, origin: Coord) ->
     }
 }
 
+fn random_supply_kind(rng: &mut impl Rng) -> SupplyKind {
+    if rng.gen_bool(0.5) {
+        SupplyKind::Radioactive
+    } else {
+        SupplyKind::Water
+    }
+}

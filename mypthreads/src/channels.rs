@@ -2,8 +2,12 @@
 //! permite que los hilos se comuniquen sin &mut Runtime
 
 use crate::thread::ThreadId;
+use std::cell::UnsafeCell;
 use std::collections::{HashMap, VecDeque};
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::{Arc, Mutex};
+
+const UNLOCKED: u32 = u32::MAX;
 
 /// canales de comunicacion del runtime
 #[derive(Clone)]
@@ -88,82 +92,109 @@ impl JoinHandle {
     }
 }
 
-/// mutex simple para sincronizacion entre hilos
+/// mutex simple para sincronizacion entre hilos, rediseñado con atomics.
 #[derive(Clone)]
 pub struct SimpleMutex {
-    locked: Arc<Mutex<Option<ThreadId>>>,
-    wait_queue: Arc<Mutex<VecDeque<ThreadId>>>,
+    /// El estado del lock.
+    /// Contiene UNLOCKED (0) si está libre, o el ThreadId del dueño si está tomado.
+    pub owner: Arc<AtomicU32>,
+
+    /// Cola de hilos esperando por el mutex.
+    /// Usamos UnsafeCell porque la sincronización la provee el runtime.
+    /// Solo el bucle del runtime (que es single-threaded) llama a .lock() y .unlock(),
+    /// por lo que el acceso a la cola está serializado.
+    pub wait_queue: Arc<UnsafeCell<VecDeque<ThreadId>>>,
 }
+unsafe impl Send for SimpleMutex {}
+unsafe impl Sync for SimpleMutex {}
+// Requerido porque UnsafeCell no es Sync por defecto.
+// Garantizamos la seguridad porque el acceso a la cola está controlado por el runtime.
 
 impl SimpleMutex {
     pub fn new() -> Self {
         Self {
-            locked: Arc::new(Mutex::new(None)),
-            wait_queue: Arc::new(Mutex::new(VecDeque::new())),
+            owner: Arc::new(AtomicU32::new(UNLOCKED)),
+            wait_queue: Arc::new(UnsafeCell::new(VecDeque::new())),
         }
     }
 
-    /// intenta adquirir el lock
-    /// retorna true si se adquirió, false si ya estaba tomado
+    /// Intenta adquirir el lock de forma atómica y sin bloqueo.
+    /// Retorna true si se adquirió, false si ya estaba tomado.
+    /// Esta función es segura para ser llamada desde cualquier hilo en cualquier momento.
     pub fn try_lock(&self, tid: ThreadId) -> bool {
-        let mut locked = self.locked.lock().unwrap();
-
-        let owner_before = *locked;
-        // Decide el resultado sin alterar aún el estado
-        let result = if owner_before.is_none() { true } else { false };
-
-        eprintln!(
-            "[SimpleMutex::try_lock] incoming_tid={:?} owner_before={:?} -> result={}",
-            tid, owner_before, result
-        );
-
-        // Si se adquirió, asignar el owner
-        if result {
-            *locked = Some(tid);
-            eprintln!("[SimpleMutex::try_lock] owner_after=Some({:?})", tid);
-        } else {
-            eprintln!("[SimpleMutex::try_lock] owner_after={:?}", *locked);
-        }
-
-        result
+        // `compare_exchange` es una operación atómica que intenta cambiar el valor
+        // de `owner` desde `UNLOCKED` a `tid`.
+        // Si tiene éxito (el valor era `UNLOCKED`), devuelve Ok, y hemos adquirido el lock.
+        // Si falla (el valor era otro), devuelve Err, y no hacemos nada.
+        self.owner
+            .compare_exchange(
+                UNLOCKED,
+                tid,
+                Ordering::Acquire, // Barrera de memoria para asegurar que lecturas posteriores vean los cambios.
+                Ordering::Relaxed, // Sin barrera si falla, no es necesario.
+            )
+            .is_ok()
     }
 
-    /// adquiere el lock o se encola
-    /// retorna true si debe bloquearse
+    /// Adquiere el lock o se encola si está ocupado.
+    /// Esta función es llamada únicamente por el runtime.
+    /// Retorna true si el hilo debe bloquearse.
     pub fn lock(&self, tid: ThreadId) -> bool {
-        let mut locked = self.locked.lock().unwrap();
-        if locked.is_none() {
-            *locked = Some(tid);
-            false // no se bloquea, adquirio el lock
+        // Primero, intentamos tomar el lock de forma no bloqueante.
+        if self.try_lock(tid) {
+            // ¡Éxito! El lock se adquirió inmediatamente.
+            false // No es necesario bloquearse.
         } else {
-            // ya esta tomado, encolarse
-            drop(locked);
-            self.wait_queue.lock().unwrap().push_back(tid);
-            true // debe bloquearse
+            // El lock está ocupado. Hay que encolar el hilo actual.
+            // SAFETY: El acceso a wait_queue es seguro porque solo el runtime llama a esta función.
+            let queue = unsafe { &mut *self.wait_queue.get() };
+            queue.push_back(tid);
+            true // Sí es necesario bloquearse.
         }
     }
 
-    /// libera el lock
-    /// Si hay un hilo esperando, la propiedad del lock se le da directamente a ese hilo
-    /// retorna el siguiente hilo en espera si hay alguno
+    /// Libera el lock.
+    /// Si hay un hilo esperando, la propiedad del lock se le transfiere directamente.
+    /// Retorna el siguiente hilo en espera si hay alguno.
+    /// Esta función es llamada únicamente por el runtime.
     pub fn unlock(&self, tid: ThreadId) -> Option<ThreadId> {
-        let mut locked = self.locked.lock().unwrap();
-
-        if *locked != Some(tid) {
+        let current_owner = self.owner.load(Ordering::Relaxed);
+        if current_owner != tid {
             panic!(
                 "hilo {:?} intenta liberar mutex que no posee (dueño actual: {:?})",
-                tid, *locked
+                tid, current_owner
             );
         }
 
-        //Sacaar el siguiente hilo de la cola de espera
-        let next_in_queue = self.wait_queue.lock().unwrap().pop_front();
+        // SAFETY: El acceso a wait_queue es seguro por la misma razón que en lock().
+        let queue = unsafe { &mut *self.wait_queue.get() };
 
-        //Pasar el lock al siguiente
-        //Si no hay nadie esperando, entonces el lock queda libre
-        *locked = next_in_queue;
+        if let Some(next_tid) = queue.pop_front() {
+            // Hay un hilo esperando. Le transferimos la propiedad del lock directamente.
+            self.owner.store(next_tid, Ordering::Release);
+            // Retornamos el ID del hilo para que el runtime lo despierte.
+            Some(next_tid)
+        } else {
+            // No hay nadie en la cola de espera. Marcamos el lock como libre.
+            self.owner.store(UNLOCKED, Ordering::Release);
+            // No hay hilo que despertar.
+            None
+        }
+    }
 
-        //retornar el ID del hilo que se tiene que desspertar
-        next_in_queue
+    /// Fuerza el unlock sin verificar ownership
+    /// SOLO para usar desde el main thread en situaciones controladas
+    pub fn force_unlock(&self) {
+        // SAFETY: El acceso a wait_queue es seguro porque esto solo se llama desde main
+        // cuando los demás threads están bloqueados
+        let queue = unsafe { &mut *self.wait_queue.get() };
+
+        if let Some(next_tid) = queue.pop_front() {
+            // Hay un hilo esperando. Le transferimos la propiedad del lock directamente.
+            self.owner.store(next_tid, Ordering::Release);
+        } else {
+            // No hay nadie en la cola de espera. Marcamos el lock como libre.
+            self.owner.store(UNLOCKED, Ordering::Release);
+        }
     }
 }
