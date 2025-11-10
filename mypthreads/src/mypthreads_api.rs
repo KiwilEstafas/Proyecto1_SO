@@ -1,4 +1,3 @@
-// en mypthreads/src/mypthreads_api.rs
 
 //EL frontend que  llamaria la simulacion de la ciudad
 use crate::api_context;
@@ -110,8 +109,12 @@ pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal {
 
 //Bloquear un utex sin esperar 
 pub fn my_mutex_trylock(mutex: &MyMutex) -> bool {
-    api_context::ctx_mutex_trylock(&mutex.internal)
+    let tid_opt = api_context::try_current_tid();
+    let tid = tid_opt.unwrap_or(0);
+    eprintln!("[my_mutex_trylock] try_current_tid() -> {:?}, using tid={:?}", tid_opt, tid);
+    mutex.internal.try_lock(tid)
 }
+
 
 //Destuye un mutex
 pub fn my_mutex_destroy(_mutex: &mut MyMutex) {

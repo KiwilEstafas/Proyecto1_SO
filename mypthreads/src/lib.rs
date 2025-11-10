@@ -10,6 +10,7 @@ pub mod signals;
 pub mod context_wrapper;
 pub mod mypthreads_api;
 pub mod sched;
+pub mod sync;
 
 // Tipos públicos de la biblioteca
 pub use runtime::ThreadRuntimeV2;
@@ -19,3 +20,4 @@ pub use api_context::*; // Exporta ctx_yield, ctx_exit, etc.
 pub use signals::ThreadSignal; // Aún se usa en ContextThreadEntry
 pub use context_wrapper::ThreadContext;
 pub use thread_data::{TransferMessage, ThreadResponse}; // Útil para debugging
+pub use sync::{Shared, shared};

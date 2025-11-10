@@ -2,9 +2,9 @@
 // Puentes con diferentes reglas de tráfico
 // REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
 
+use mypthreads::sync::{shared, Shared};
 use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
-use crate::sync::Shared;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
@@ -80,14 +80,15 @@ impl Bridge {
             bridge_type: BridgeType::TrafficLight,
             row,
             capacity: 1,
-            state: crate::sync::shared(BridgeState {
+            // --- Y AHORA ESTO FUNCIONA ---
+            state: shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
             }),
-            wait_queue: crate::sync::shared(BinaryHeap::new()),
+            wait_queue: shared(BinaryHeap::new()),
             light_cycle_ms: cycle_ms,
             priority_direction: TrafficDirection::NorthToSouth,
         }
@@ -100,14 +101,14 @@ impl Bridge {
             bridge_type: BridgeType::Yield,
             row,
             capacity: 1,
-            state: crate::sync::shared(BridgeState {
+            state: shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
             }),
-            wait_queue: crate::sync::shared(BinaryHeap::new()),
+            wait_queue:shared(BinaryHeap::new()),
             light_cycle_ms: 0,
             priority_direction: priority_dir,
         }
@@ -120,14 +121,14 @@ impl Bridge {
             bridge_type: BridgeType::Drawbridge,
             row,
             capacity: 2,
-            state: crate::sync::shared(BridgeState {
+            state: shared(BridgeState {
                 vehicles_crossing: 0,
                 current_direction: None,
                 boat_passing: false,
                 light_state: TrafficLightState::NorthGreen,
                 last_light_change_ms: 0,
             }),
-            wait_queue: crate::sync::shared(BinaryHeap::new()),
+            wait_queue: shared(BinaryHeap::new()),
             light_cycle_ms: 0,
             priority_direction: TrafficDirection::NorthToSouth,
         }
@@ -312,4 +313,3 @@ impl Bridge {
         }
     }
 }
-

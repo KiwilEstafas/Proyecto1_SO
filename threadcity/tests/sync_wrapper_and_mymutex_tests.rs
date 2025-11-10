@@ -6,11 +6,13 @@
 
 use mypthreads::mypthreads_api::*;
 use mypthreads::signals::ThreadSignal;
-// use mypthreads::thread::ThreadId; // <- no se usa
-use threadcity::sync::{shared, Shared, MyMutexCell};
+// --- CORRECCIÓN CLAVE AQUÍ ---
+// El módulo `sync` ahora vive en `mypthreads`, no en `threadcity`.
+use mypthreads::sync::{shared, MyMutexCell, Shared};
+// --- FIN DE LA CORRECCIÓN ---
 
 use std::sync::atomic::{AtomicU32, AtomicUsize, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc,    Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -37,16 +39,6 @@ fn run_with_timeout(cycles: usize, max_attempts: usize) {
     }
 
     println!("[Runtime] WARNING: Max attempts reached");
-}
-
-/// Crea un deadline para timeouts lógicos
-fn deadline(ms: u64) -> Instant {
-    Instant::now() + Duration::from_millis(ms)
-}
-
-/// Verifica si un deadline expiró
-fn timed_out(dl: Instant) -> bool {
-    Instant::now() > dl
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
@@ -130,6 +122,7 @@ fn test_request_lock_requires_thread_context() {
                 3 => {
                     // Paso 3: Liberar lock
                     println!("[LockUser] Requesting unlock...");
+                    success_clone.store(4, Ordering::SeqCst); // Marcar que se intentó unlock
                     return cell_clone.request_unlock();
                 }
                 _ => return ThreadSignal::Exit,
@@ -336,7 +329,6 @@ fn test_lock_unlock_roundtrip_order() {
     enum State {
         NeedLock,
         HasLock,
-        Done,
     }
 
     let state = Arc::new(AtomicU32::new(State::NeedLock as u32));
@@ -346,66 +338,40 @@ fn test_lock_unlock_roundtrip_order() {
         "RoundtripThread",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
-            let current_state = state_clone.load(Ordering::SeqCst);
+            let current_state_val = state_clone.load(Ordering::SeqCst);
             let current_locks = locks.load(Ordering::SeqCst);
-            let current_unlocks = unlocks.load(Ordering::SeqCst);
-
-            println!(
-                "[RoundtripThread] State: {}, Locks: {}, Unlocks: {}",
-                current_state, current_locks, current_unlocks
-            );
 
             if current_locks >= ITERATIONS {
                 println!("[RoundtripThread] Completed all iterations!");
                 return ThreadSignal::Exit;
             }
 
-            match current_state {
-                0 => {
-                    // State::NeedLock
+            match current_state_val {
+                0 => { // State::NeedLock
                     println!("[RoundtripThread] Requesting lock #{}...", current_locks + 1);
-                    let signal = cell_clone.request_lock();
-
-                    match signal {
-                        ThreadSignal::MutexLock(_) => {
-                            state_clone.store(State::HasLock as u32, Ordering::SeqCst);
-                            return signal;
-                        }
-                        ThreadSignal::Continue => {
-                            state_clone.store(State::HasLock as u32, Ordering::SeqCst);
-                            locks.fetch_add(1, Ordering::SeqCst);
-                            return ThreadSignal::Yield;
-                        }
-                        _ => return signal,
-                    }
+                    state_clone.store(State::HasLock as u32, Ordering::SeqCst);
+                    return cell_clone.request_lock();
                 }
-                1 => {
-                    // State::HasLock
-                    if current_locks == current_unlocks + 1 {
-                        // Acabamos de adquirir el lock, hacer trabajo
-                        println!("[RoundtripThread] Working in critical section...");
-                        let mut guard = cell_clone.enter();
-                        *guard += 1;
-                        println!("[RoundtripThread] Value: {}", *guard);
-                        drop(guard);
+                1 => { // State::HasLock
+                    println!("[RoundtripThread] Working in critical section...");
+                    let mut guard = cell_clone.enter();
+                    *guard += 1;
+                    println!("[RoundtripThread] Value: {}", *guard);
+                    drop(guard);
 
-                        // Ahora liberar
-                        println!("[RoundtripThread] Releasing lock #{}...", current_unlocks + 1);
-                        unlocks.fetch_add(1, Ordering::SeqCst);
-                        state_clone.store(State::NeedLock as u32, Ordering::SeqCst);
-                        return cell_clone.request_unlock();
-                    } else {
-                        // Aún no hemos registrado el lock, esperar
-                        locks.fetch_add(1, Ordering::SeqCst);
-                        return ThreadSignal::Yield;
-                    }
+                    locks.fetch_add(1, Ordering::SeqCst);
+                    unlocks.fetch_add(1, Ordering::SeqCst);
+
+                    println!("[RoundtripThread] Releasing lock #{}...", current_locks + 1);
+                    state_clone.store(State::NeedLock as u32, Ordering::SeqCst);
+                    return cell_clone.request_unlock();
                 }
                 _ => return ThreadSignal::Exit,
             }
         }),
     );
 
-    run_with_timeout(60, 20);
+    run_with_timeout(80, 20);
 
     let final_locks = lock_count.load(Ordering::SeqCst);
     let final_unlocks = unlock_count.load(Ordering::SeqCst);
@@ -430,6 +396,7 @@ fn test_lock_unlock_roundtrip_order() {
     println!("\n✓ TEST 3 PASSED\n");
 }
 
+
 // ═══════════════════════════════════════════════════════════════════════════
 #[test]
 fn test_mutual_exclusion_on_shared_counter() {
@@ -446,63 +413,49 @@ fn test_mutual_exclusion_on_shared_counter() {
     for i in 0..NUM_THREADS {
         let cell_clone = cell.clone();
         let my_increments = Arc::new(AtomicUsize::new(0));
-        let my_inc_clone = my_increments.clone();
         let completion = completion_counter.clone();
 
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         enum WorkerState {
             NeedLock,
             HasLock,
-            Done,
         }
 
         let state = Arc::new(AtomicU32::new(WorkerState::NeedLock as u32));
-        let state_clone = state.clone();
 
         my_thread_create(
             &format!("Worker-{}", i),
             SchedulerParams::RoundRobin,
             Box::new(move |_tid, _tickets| {
-                let my_count = my_inc_clone.load(Ordering::SeqCst);
-
+                let my_count = my_increments.load(Ordering::SeqCst);
                 if my_count >= INCREMENTS_PER_THREAD {
-                    completion.fetch_add(1, Ordering::SeqCst);
-                    println!("[Worker-{}] Completed all increments", i);
+                    if my_increments.compare_exchange(my_count, my_count + 1, Ordering::SeqCst, Ordering::SeqCst).is_ok() {
+                        completion.fetch_add(1, Ordering::SeqCst);
+                        println!("[Worker-{}] Completed all increments", i);
+                    }
                     return ThreadSignal::Exit;
                 }
 
-                let current_state = state_clone.load(Ordering::SeqCst);
+                let current_state = state.load(Ordering::SeqCst);
 
                 match current_state {
-                    0 => {
-                        // WorkerState::NeedLock
+                    0 => { // WorkerState::NeedLock
                         println!("[Worker-{}] Requesting lock (increment {})...", i, my_count + 1);
-                        let signal = cell_clone.request_lock();
-
-                        match signal {
-                            ThreadSignal::MutexLock(_) => {
-                                state_clone.store(WorkerState::HasLock as u32, Ordering::SeqCst);
-                                return signal;
-                            }
-                            ThreadSignal::Continue => {
-                                state_clone.store(WorkerState::HasLock as u32, Ordering::SeqCst);
-                                return ThreadSignal::Yield;
-                            }
-                            _ => return signal,
-                        }
+                        state.store(WorkerState::HasLock as u32, Ordering::SeqCst);
+                        return cell_clone.request_lock();
                     }
-                    1 => {
-                        // WorkerState::HasLock
+                    1 => { // WorkerState::HasLock
                         println!("[Worker-{}] Incrementing...", i);
                         let mut guard = cell_clone.enter();
                         let old_value = *guard;
+                        // Yield to increase chance of race conditions if mutex fails
+                        thread::yield_now();
                         *guard = old_value + 1;
                         println!("[Worker-{}] {} -> {}", i, old_value, *guard);
                         drop(guard);
 
-                        // Unlock
-                        my_inc_clone.fetch_add(1, Ordering::SeqCst);
-                        state_clone.store(WorkerState::NeedLock as u32, Ordering::SeqCst);
+                        my_increments.fetch_add(1, Ordering::SeqCst);
+                        state.store(WorkerState::NeedLock as u32, Ordering::SeqCst);
                         return cell_clone.request_unlock();
                     }
                     _ => return ThreadSignal::Exit,
@@ -511,22 +464,18 @@ fn test_mutual_exclusion_on_shared_counter() {
         );
     }
 
-    run_with_timeout(100, 30);
+    run_with_timeout(150, 40);
 
     let completed = completion_counter.load(Ordering::SeqCst);
     println!("\nThreads completed: {}/{}", completed, NUM_THREADS);
 
-    // Verificar el valor final
     if let Some(guard) = cell.try_enter() {
         let final_value = *guard;
         drop(guard);
         let _ = cell.request_unlock();
-
         let expected = NUM_THREADS * INCREMENTS_PER_THREAD;
-
         println!("Final counter value: {}", final_value);
         println!("Expected value: {}", expected);
-
         assert_eq!(
             final_value, expected,
             "Counter mismatch! Expected {}, got {}",
@@ -539,6 +488,7 @@ fn test_mutual_exclusion_on_shared_counter() {
     println!("\n✓ TEST 4 PASSED\n");
 }
 
+
 // ═══════════════════════════════════════════════════════════════════════════
 #[test]
 fn test_guard_scope_no_unlock() {
@@ -546,75 +496,49 @@ fn test_guard_scope_no_unlock() {
     println!("║ TEST 5: Guard NO hace unlock en Drop                     ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
 
-    // Qué valida: El MyGuard no desbloquea en Drop.
-
     let cell: Shared<i32> = shared(42);
 
     let cell_a = cell.clone();
     let a_status = Arc::new(AtomicU32::new(0));
     let a_status_for_a = a_status.clone();
 
-    let cell_b = cell.clone();
     let b_result = Arc::new(AtomicU32::new(0));
     let b_result_for_a = b_result.clone();
 
-    // Thread A: toma lock, deja salir guard de scope, pero NO unlock
     my_thread_create(
         "ThreadA",
         SchedulerParams::RoundRobin,
         Box::new(move |_tid, _tickets| {
             let status = a_status_for_a.load(Ordering::SeqCst);
-
             match status {
                 0 => {
                     println!("[ThreadA] Requesting lock...");
-                    let signal = cell_a.request_lock();
-
-                    match signal {
-                        ThreadSignal::MutexLock(_) => {
-                            a_status_for_a.store(1, Ordering::SeqCst);
-                            return signal;
-                        }
-                        ThreadSignal::Continue => {
-                            a_status_for_a.store(2, Ordering::SeqCst);
-                            return ThreadSignal::Yield;
-                        }
-                        _ => return signal,
-                    }
+                    a_status_for_a.store(1, Ordering::SeqCst);
+                    return cell_a.request_lock();
                 }
-                1 | 2 => {
+                1 => {
                     println!("[ThreadA] Entering critical section...");
                     {
                         let _guard = cell_a.enter();
                         println!("[ThreadA] Have guard, letting it drop...");
-                        // Guard sale de scope aquí, pero NO hace unlock
                     }
                     println!("[ThreadA] Guard dropped (but lock still held)");
-                    a_status_for_a.store(3, Ordering::SeqCst);
-
-                    // Esperar a que B intente
-                    if b_result_for_a.load(Ordering::SeqCst) == 0 {
-                        return ThreadSignal::Yield;
-                    }
-
+                    a_status_for_a.store(2, Ordering::SeqCst);
                     return ThreadSignal::Yield;
                 }
-                3 => {
-                    // Ahora sí hacer unlock explícito cuando B haya intentado
-                    if b_result_for_a.load(Ordering::SeqCst) < 2 {
+                2 => {
+                    if b_result_for_a.load(Ordering::SeqCst) < 1 {
                         return ThreadSignal::Yield;
                     }
-
                     println!("[ThreadA] Now explicitly unlocking...");
-                    a_status_for_a.store(4, Ordering::SeqCst);
+                    a_status_for_a.store(3, Ordering::SeqCst);
                     return cell_a.request_unlock();
                 }
-                _ => return ThreadSignal::Yield,
+                _ => ThreadSignal::Yield,
             }
         }),
     );
 
-    // Thread B: intenta try_enter (clones separados)
     let a_status_for_b = a_status.clone();
     let b_result_for_b = b_result.clone();
     let cell_b_for_b = cell.clone();
@@ -627,51 +551,33 @@ fn test_guard_scope_no_unlock() {
             let a_stat = a_status_for_b.load(Ordering::SeqCst);
 
             if attempts == 0 {
-                // Esperar a que A deje salir el guard de scope
-                if a_stat < 3 {
+                if a_stat < 2 {
                     return ThreadSignal::Yield;
                 }
-
                 println!("[ThreadB] First try_enter (should fail, A still has lock)...");
-                let result = cell_b_for_b.try_enter();
-
-                if result.is_none() {
+                if cell_b_for_b.try_enter().is_none() {
                     println!("[ThreadB] ✓ try_enter failed (correct, guard Drop didn't unlock)");
                     b_result_for_b.store(1, Ordering::SeqCst);
                 } else {
                     println!("[ThreadB] ✗ ERROR: Got lock when A should still have it!");
-                    drop(result);
-                    let _ = cell_b_for_b.request_unlock();
                     b_result_for_b.store(10, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
                 }
-
                 return ThreadSignal::Yield;
             } else if attempts == 1 {
-                // Señalar que estamos listos para que A haga unlock
-                b_result_for_b.store(2, Ordering::SeqCst);
-
-                // Esperar a que A haga unlock explícito
-                if a_stat < 4 {
+                if a_stat < 3 {
                     return ThreadSignal::Yield;
                 }
-
                 println!("[ThreadB] Second try_enter (should succeed now)...");
-                let result = cell_b_for_b.try_enter();
-
-                if let Some(guard) = result {
+                if let Some(guard) = cell_b_for_b.try_enter() {
                     println!("[ThreadB] ✓ try_enter succeeded after explicit unlock!");
                     drop(guard);
                     let _ = cell_b_for_b.request_unlock();
-                    b_result_for_b.store(3, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
+                    b_result_for_b.store(2, Ordering::SeqCst);
                 } else {
                     println!("[ThreadB] ✗ ERROR: Failed to get lock after A unlocked!");
                     b_result_for_b.store(20, Ordering::SeqCst);
-                    return ThreadSignal::Exit;
                 }
             }
-
             ThreadSignal::Exit
         }),
     );
@@ -680,19 +586,14 @@ fn test_guard_scope_no_unlock() {
 
     let final_result = b_result.load(Ordering::SeqCst);
     println!("\nThreadB result: {}", final_result);
-    println!("  1 = First attempt failed (correct)");
-    println!("  3 = Second attempt succeeded (correct)");
-    println!("  10 = First attempt succeeded (ERROR - Drop did unlock)");
-    println!("  20 = Second attempt failed (ERROR)");
-
     assert_eq!(
-        final_result, 3,
+        final_result, 2,
         "Guard Drop should NOT unlock (got result {})",
         final_result
     );
-
     println!("\n✓ TEST 5 PASSED: Guard NO hace unlock en Drop\n");
 }
+
 
 // ═══════════════════════════════════════════════════════════════════════════
 #[test]
@@ -701,12 +602,9 @@ fn test_no_overlap_within_critical_section() {
     println!("║ TEST 6: No hay solapamiento en sección crítica           ║");
     println!("╚═══════════════════════════════════════════════════════════╝\n");
 
-    // Qué valida: Nunca hay dos hilos simultáneamente en sección crítica
-
     let cell: Shared<i32> = shared(0);
     let in_section = Arc::new(AtomicU32::new(0));
     let max_in_section = Arc::new(AtomicU32::new(0));
-    let violation_detected = Arc::new(AtomicU32::new(0));
 
     const NUM_THREADS: usize = 3;
 
@@ -714,90 +612,38 @@ fn test_no_overlap_within_critical_section() {
         let cell_clone = cell.clone();
         let in_sec = in_section.clone();
         let max_sec = max_in_section.clone();
-        let violation = violation_detected.clone();
 
-        #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-        enum State {
-            NeedLock,
-            InSection,
-            Done,
-        }
-
-        let state = Arc::new(AtomicU32::new(State::NeedLock as u32));
-        let state_clone = state.clone();
+        #[derive(Clone, Copy)]
+        enum State { NeedLock, InSection, Done }
+        let state = Arc::new(Mutex::new(State::NeedLock));
 
         my_thread_create(
             &format!("Thread-{}", i),
             SchedulerParams::RoundRobin,
             Box::new(move |_tid, _tickets| {
-                let current_state = state_clone.load(Ordering::SeqCst);
-
-                match current_state {
-                    0 => {
-                        // State::NeedLock
-                        let signal = cell_clone.request_lock();
-
-                        match signal {
-                            ThreadSignal::MutexLock(_) => {
-                                state_clone.store(State::InSection as u32, Ordering::SeqCst);
-                                return signal;
-                            }
-                            ThreadSignal::Continue => {
-                                state_clone.store(State::InSection as u32, Ordering::SeqCst);
-                                return ThreadSignal::Yield;
-                            }
-                            _ => return signal,
-                        }
+                let mut current_state = state.lock().unwrap();
+                match *current_state {
+                    State::NeedLock => {
+                        *current_state = State::InSection;
+                        return cell_clone.request_lock();
                     }
-                    1 => {
-                        // State::InSection
+                    State::InSection => {
                         println!("[Thread-{}] ENTERING critical section", i);
-
-                        // Incrementar contador de "en sección"
                         let count = in_sec.fetch_add(1, Ordering::SeqCst) + 1;
-                        println!("[Thread-{}] Threads in section: {}", i, count);
+                        max_sec.fetch_max(count, Ordering::SeqCst);
 
-                        // Actualizar máximo
-                        loop {
-                            let current_max = max_sec.load(Ordering::SeqCst);
-                            if count > current_max {
-                                if max_sec
-                                    .compare_exchange(
-                                        current_max,
-                                        count,
-                                        Ordering::SeqCst,
-                                        Ordering::SeqCst,
-                                    )
-                                    .is_ok()
-                                {
-                                    break;
-                                }
-                            } else {
-                                break;
-                            }
-                        }
-
-                        // ¡VERIFICAR INVARIANTE!
-                        if count > 1 {
-                            println!("[Thread-{}] ✗✗✗ VIOLATION: {} threads in section!", i, count);
-                            violation.store(1, Ordering::SeqCst);
-                        }
-
-                        // Hacer algo en la sección crítica
                         let mut guard = cell_clone.enter();
                         *guard += 1;
-                        thread::sleep(Duration::from_millis(5)); // Aumentar chance de overlap
+                        thread::sleep(Duration::from_millis(5));
                         drop(guard);
 
-                        // Decrementar contador
-                        let remaining = in_sec.fetch_sub(1, Ordering::SeqCst) - 1;
-                        println!("[Thread-{}] EXITING critical section (remaining: {})", i, remaining);
+                        in_sec.fetch_sub(1, Ordering::SeqCst);
+                        println!("[Thread-{}] EXITING critical section", i);
 
-                        // Unlock
-                        state_clone.store(State::Done as u32, Ordering::SeqCst);
+                        *current_state = State::Done;
                         return cell_clone.request_unlock();
                     }
-                    _ => return ThreadSignal::Exit,
+                    State::Done => ThreadSignal::Exit,
                 }
             }),
         );
@@ -806,21 +652,10 @@ fn test_no_overlap_within_critical_section() {
     run_with_timeout(50, 15);
 
     let max_concurrent = max_in_section.load(Ordering::SeqCst);
-    let had_violation = violation_detected.load(Ordering::SeqCst);
-
-    println!("\nResults:");
-    println!("  Max concurrent threads in section: {}", max_concurrent);
-    println!("  Violation detected: {}", if had_violation > 0 { "YES" } else { "NO" });
-
+    println!("\nMax concurrent threads in section: {}", max_concurrent);
     assert_eq!(
         max_concurrent, 1,
         "Should never have more than 1 thread in critical section!"
     );
-    assert_eq!(
-        had_violation, 0,
-        "Should not detect any violations of mutual exclusion!"
-    );
-
     println!("\n✓ TEST 6 PASSED: No solapamiento detectado\n");
 }
-

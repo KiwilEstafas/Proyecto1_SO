@@ -92,3 +92,10 @@ pub fn ctx_mutex_trylock(mutex: &SimpleMutex) -> bool {
     let tid = current_tid();
     mutex.try_lock(tid)
 }
+
+/// Intenta obtener el ThreadId actual sin causar pánico.
+/// Devuelve None si el hilo no tiene contexto inicializado.
+pub fn try_current_tid() -> Option<ThreadId> {
+    CURRENT_TID.with(|t| *t.borrow())
+}
+

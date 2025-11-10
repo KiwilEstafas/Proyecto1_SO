@@ -7,7 +7,7 @@ use crate::{AgentInfo, AgentType};
 use mypthreads::thread::ThreadId;
 use rand::{rng, seq::IndexedRandom, Rng};
 use std::collections::HashMap;
-use crate::sync::Shared;
+use mypthreads::sync::Shared;
 
 #[derive(Debug, Clone)]
 pub struct Spawner {
@@ -177,5 +177,5 @@ pub type SharedCity = Shared<City>;
 
 /// Crea una ciudad compartida usando nuestro mutex
 pub fn create_shared_city(city: City) -> SharedCity {
-    crate::sync::shared(city)
+    mypthreads::sync::shared(city) // La creación también usa la función correcta
 }

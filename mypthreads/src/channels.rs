@@ -2,21 +2,21 @@
 //! permite que los hilos se comuniquen sin &mut Runtime
 
 use crate::thread::ThreadId;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
-use std::collections::{VecDeque, HashMap};
 
 /// canales de comunicacion del runtime
 #[derive(Clone)]
 pub struct ThreadChannels {
     /// hilos que hicieron yield y estan listos
     pub yield_queue: Arc<Mutex<VecDeque<ThreadId>>>,
-    
+
     /// hilos que se bloquearon
     pub blocked_queue: Arc<Mutex<VecDeque<ThreadId>>>,
-    
+
     /// hilos que terminaron
     pub terminated_queue: Arc<Mutex<VecDeque<ThreadId>>>,
-    
+
     /// datos compartidos entre hilos
     pub shared_data: Arc<Mutex<HashMap<String, SharedData>>>,
 }
@@ -54,12 +54,12 @@ impl ThreadChannels {
     pub fn report_exit(&self, tid: ThreadId) {
         self.terminated_queue.lock().unwrap().push_back(tid);
     }
-    
+
     /// guardar dato compartido
     pub fn store(&self, key: String, data: SharedData) {
         self.shared_data.lock().unwrap().insert(key, data);
     }
-    
+
     /// obtener dato compartido
     pub fn get(&self, key: &str) -> Option<SharedData> {
         self.shared_data.lock().unwrap().get(key).cloned()
@@ -107,14 +107,27 @@ impl SimpleMutex {
     /// retorna true si se adquirió, false si ya estaba tomado
     pub fn try_lock(&self, tid: ThreadId) -> bool {
         let mut locked = self.locked.lock().unwrap();
-        if locked.is_none() {
+
+        let owner_before = *locked;
+        // Decide el resultado sin alterar aún el estado
+        let result = if owner_before.is_none() { true } else { false };
+
+        eprintln!(
+            "[SimpleMutex::try_lock] incoming_tid={:?} owner_before={:?} -> result={}",
+            tid, owner_before, result
+        );
+
+        // Si se adquirió, asignar el owner
+        if result {
             *locked = Some(tid);
-            true
+            eprintln!("[SimpleMutex::try_lock] owner_after=Some({:?})", tid);
         } else {
-            false
+            eprintln!("[SimpleMutex::try_lock] owner_after={:?}", *locked);
         }
+
+        result
     }
-    
+
     /// adquiere el lock o se encola
     /// retorna true si debe bloquearse
     pub fn lock(&self, tid: ThreadId) -> bool {
@@ -135,9 +148,12 @@ impl SimpleMutex {
     /// retorna el siguiente hilo en espera si hay alguno
     pub fn unlock(&self, tid: ThreadId) -> Option<ThreadId> {
         let mut locked = self.locked.lock().unwrap();
-        
+
         if *locked != Some(tid) {
-            panic!("hilo {:?} intenta liberar mutex que no posee (dueño actual: {:?})", tid, *locked);
+            panic!(
+                "hilo {:?} intenta liberar mutex que no posee (dueño actual: {:?})",
+                tid, *locked
+            );
         }
 
         //Sacaar el siguiente hilo de la cola de espera
@@ -146,7 +162,7 @@ impl SimpleMutex {
         //Pasar el lock al siguiente
         //Si no hay nadie esperando, entonces el lock queda libre
         *locked = next_in_queue;
-        
+
         //retornar el ID del hilo que se tiene que desspertar
         next_in_queue
     }
