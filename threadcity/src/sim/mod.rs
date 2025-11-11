@@ -4,6 +4,7 @@ use mypthreads::thread::ThreadId;
 use rand::{Rng};
 use std::collections::HashMap;
 use mypthreads::sync::Shared;
+use crate::tc_log; // <--- NUEVO
 
 #[derive(Debug, Clone)]
 pub struct Spawner {
@@ -39,18 +40,9 @@ impl City {
         }
     }
 
-    pub fn add_river(&mut self) {
-        self.river = Some(River::default());
-    }
-
-    pub fn add_bridge(&mut self, bridge: Bridge) {
-        self.bridges.push(bridge);
-    }
-
-    pub fn add_commerce(&mut self, id: u32, loc: (u32, u32)) {
-        self.commerces
-            .push(Commerce::new(id, Coord::new(loc.0, loc.1)));
-    }
+    pub fn add_river(&mut self) { self.river = Some(River::default()); }
+    pub fn add_bridge(&mut self, bridge: Bridge) { self.bridges.push(bridge); }
+    pub fn add_commerce(&mut self, id: u32, loc: (u32, u32)) { self.commerces.push(Commerce::new(id, Coord::new(loc.0, loc.1))); }
 
     pub fn add_nuclear_plant(
         &mut self,
@@ -59,37 +51,18 @@ impl City {
         requires: Vec<SupplySpec>,
         policy: DeadlinePolicy,
     ) {
-        self.plants.push(NuclearPlant::new(
-            id,
-            Coord::new(loc.0, loc.1),
-            requires,
-            policy,
-        ));
+        self.plants.push(NuclearPlant::new(id, Coord::new(loc.0, loc.1), requires, policy));
     }
 
     pub fn update(&mut self, dt_ms: u64) {
         self.time_ms += dt_ms;
-
-        // Actualizar puentes (semáforos)
-        for bridge in &mut self.bridges {
-            bridge.update(self.time_ms);
-        }
+        for bridge in &mut self.bridges { bridge.update(self.time_ms); }
     }
 
-    pub fn current_time(&self) -> u64 {
-        self.time_ms
-    }
-
-    /// Encuentra un puente por ID
-    pub fn get_bridge(&self, id: u32) -> Option<&Bridge> {
-        self.bridges.iter().find(|b| b.id == id)
-    }
-
-    /// Encuentra una planta por coordenadas
+    pub fn current_time(&self) -> u64 { self.time_ms }
+    pub fn get_bridge(&self, id: u32) -> Option<&Bridge> { self.bridges.iter().find(|b| b.id == id) }
     pub fn find_plant_at(&mut self, coord: Coord) -> Option<&mut NuclearPlant> {
-        self.plants
-            .iter_mut()
-            .find(|p| p.loc.x == coord.x && p.loc.y == coord.y)
+        self.plants.iter_mut().find(|p| p.loc.x == coord.x && p.loc.y == coord.y)
     }
 
     /// Verifica deadlines de las plantas. Si una falla, imprime un mensaje y la reinicia.
@@ -97,29 +70,26 @@ impl City {
         for plant in &mut self.plants {
             let _ = plant.tick_emergency(self.time_ms);
 
-            // Hacemos una copia de los requerimientos para evitar problemas de borrowing.
             let requires = plant.requires.clone();
-
             for supply in &requires {
                 let last_delivery = plant.get_last_delivery_time(&supply.kind);
                 let deadline = last_delivery + supply.deadline_ms;
                 let fail_time = deadline + plant.deadline_policy.max_lateness_ms;
 
-                //Umbral de riesgo del 80%
                 let risk_threshold = 0.8;
-                let risk_time =
-                    last_delivery + ((deadline - last_delivery) as f64 * risk_threshold) as u64;
+                let risk_time = last_delivery + ((deadline - last_delivery) as f64 * risk_threshold) as u64;
+
                 if self.time_ms > fail_time {
                     plant.status = PlantStatus::Exploded;
-                    println!(
+                    tc_log!(
                         "\n☢️☢️☢️ ¡EXPLOSIÓN! Planta {} falló por falta de {:?} en tiempo {}ms (Límite era: {}ms)",
                         plant.id, supply.kind, self.time_ms, fail_time
                     );
                     plant.reset(self.time_ms);
-                    break; //Si explota no necesita revisar los demas suministros de la planta
+                    break;
                 } else if self.time_ms > risk_time && plant.status == PlantStatus::Ok {
                     plant.status = PlantStatus::AtRisk;
-                    println!(
+                    tc_log!(
                         "\n⚠️⚠️⚠️ ¡ALERTA! Planta {} en riesgo por {:?}. Tiempo: {}ms (Límite: {}ms)",
                         plant.id, supply.kind, self.time_ms, deadline
                     );
@@ -132,7 +102,6 @@ impl City {
         let mut new_agents = Vec::new();
         let mut rng = rand::rng();
 
-        // --- Lógica para Vehículos ---
         if self.time_ms >= self.spawner.next_vehicle_spawn_ms {
             // ¡Es hora de crear un vehículo!
 
@@ -146,23 +115,23 @@ impl City {
 
             // Calculamos cuándo será el próximo spawn de vehículo.
             // Usamos un valor aleatorio para que no sea predecible (ej. entre 1 y 4 segundos)
+          //DUPLICADO POR CONFLICTO, FIJARSE
             let next_spawn_in = rng.random_range(1000..4000);
+            let agent_type = if rng.gen_bool(0.1) { AgentType::Ambulance } else { AgentType::Car };
+            new_agents.push(agent_type);
+
+            let next_spawn_in = rng.gen_range(1000..4000);
             self.spawner.next_vehicle_spawn_ms = self.time_ms + next_spawn_in;
-            println!(
-                "[Spawner] Próximo vehículo en {}ms (Tiempo: {})",
-                next_spawn_in, self.spawner.next_vehicle_spawn_ms
-            );
+            tc_log!("[Spawner] Próximo vehículo en {}ms (Tiempo: {})", next_spawn_in, self.spawner.next_vehicle_spawn_ms);
         }
 
-        // --- Lógica para Barcos ---
+      //DUPLICADO POR CONFLICTO FIJARSE
         if self.time_ms >= self.spawner.next_boat_spawn_ms {
             new_agents.push(AgentType::Boat);
             let next_spawn_in = rng.random_range(15000..30000); // Los barcos son menos frecuentes
+            let next_spawn_in = rng.gen_range(15000..30000);
             self.spawner.next_boat_spawn_ms = self.time_ms + next_spawn_in;
-            println!(
-                "[Spawner] Próximo barco en {}ms (Tiempo: {})",
-                next_spawn_in, self.spawner.next_boat_spawn_ms
-            );
+            tc_log!("[Spawner] Próximo barco en {}ms (Tiempo: {})", next_spawn_in, self.spawner.next_boat_spawn_ms);
         }
 
         new_agents
