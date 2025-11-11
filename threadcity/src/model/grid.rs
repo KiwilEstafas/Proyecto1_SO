@@ -1,5 +1,3 @@
-// grid  de la ciudad
-
 #[derive(Clone, Copy, Debug)]
 pub struct Grid {
     pub rows: u32,

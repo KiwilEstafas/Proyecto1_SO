@@ -1,6 +1,3 @@
-//! api de contexto para hilos preemptivos
-//! los hilos usan esta api en lugar de acceder al runtime
-
 use crate::thread::ThreadId;
 use crate::signals::ThreadSignal;
 use crate::channels::{ThreadChannels, JoinHandle, SimpleMutex};
@@ -12,7 +9,6 @@ thread_local! {
 }
 
 /// inicializa el contexto del hilo actual
-/// esto lo llama el wrapper al iniciar un hilo
 pub fn init_thread_context(tid: ThreadId, channels: ThreadChannels) {
     CURRENT_TID.with(|t| *t.borrow_mut() = Some(tid));
     CHANNELS.with(|c| *c.borrow_mut() = Some(channels));
@@ -53,8 +49,7 @@ pub fn ctx_block() -> ThreadSignal {
     ThreadSignal::Block
 }
 
-/// intenta hacer join a otro hilo
-/// retorna true si el hilo ya terminó, false si debe bloquearse
+/// intenta hacer join a otro hilo, retorna true si el hilo ya terminó, false si debe bloquearse
 pub fn ctx_join(join_handle: &JoinHandle) -> ThreadSignal {
     if join_handle.is_terminated() {
         ThreadSignal::Yield

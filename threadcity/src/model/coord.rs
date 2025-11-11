@@ -1,5 +1,3 @@
-// coordenada entera
-
 #[derive(Clone, Copy, Debug)]
 pub struct Coord {
     pub x: u32,

@@ -7,7 +7,11 @@ use crate::tc_log; // <--- NUEVO
 pub enum SupplyKind { Radioactive, Water }
 
 #[derive(Debug, Clone, Copy)]
-pub struct SupplySpec { pub kind: SupplyKind, pub deadline_ms: u64, pub period_ms: u64 }
+pub struct SupplySpec {
+    pub kind: SupplyKind,
+    pub deadline_ms: u64, 
+    pub period_ms: u64,
+}
 
 #[derive(Debug, Clone, Copy)]
 pub struct DeadlinePolicy { pub max_lateness_ms: u64 }
@@ -23,6 +27,7 @@ pub struct NuclearPlant {
     pub requires: Vec<SupplySpec>,
     pub deadline_policy: DeadlinePolicy,
     last_delivery_ms: HashMap<SupplyKind, u64>,
+    
     risk_active: HashMap<SupplyKind, bool>,
     last_emergency_at_ms: Option<u64>,
     guard_fraction: f32,
@@ -80,6 +85,7 @@ impl NuclearPlant {
         None
     }
 
+    /// Eleva emergencia SOLO en transición. Devuelve el insumo si se elevó nueva.
     pub fn maybe_raise_emergency(&mut self, now_ms: u64) -> Option<SupplyKind> {
         match self.current_deficit(now_ms, true) {
             None => { self.resolve_if_recovered(); None }

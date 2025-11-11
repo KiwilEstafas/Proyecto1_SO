@@ -1,7 +1,3 @@
-// threadcity/src/model/bridge.rs
-// Puentes con diferentes reglas de tráfico
-// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
-
 use mypthreads::sync::{shared, Shared};
 use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
@@ -32,6 +28,7 @@ struct BridgeState {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrafficLightState { NorthGreen, SouthGreen }
 
+// El struct que guardaremos en la cola. 
 #[derive(Debug, Eq, PartialEq)]
 struct WaitingVehicle {
     priority: u8,
@@ -51,7 +48,11 @@ pub struct Bridge {
     pub bridge_type: BridgeType,
     pub row: u32,
     pub capacity: u32,
+
+    // Estado protegido 
     state: Shared<BridgeState>,
+
+    // Cola de espera con prioridades 
     wait_queue: Shared<BinaryHeap<WaitingVehicle>>,
     light_cycle_ms: u64,
     priority_direction: TrafficDirection,
@@ -115,6 +116,7 @@ impl Bridge {
         }
     }
 
+    /// Actualizar el estado del puente (para semáforos)
     pub fn update(&mut self, current_time_ms: u64) {
         if self.bridge_type != BridgeType::TrafficLight { return; }
 
@@ -133,6 +135,7 @@ impl Bridge {
         }
     }
 
+    /// Intentar cruzar el puente (vehículo)
     pub fn try_cross(&self, tid: ThreadId, priority: u8, direction: TrafficDirection) -> bool {
         if let Some(mut state) = self.state.try_enter() {
             if state.boat_passing {

@@ -1,11 +1,7 @@
-// threadcity/src/sim/mod.rs
-// Sistema de simulacion de ThreadCity
-// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
-
 use crate::model::*;
 use crate::{AgentInfo, AgentType};
 use mypthreads::thread::ThreadId;
-use rand::{rng, seq::IndexedRandom, Rng};
+use rand::{Rng};
 use std::collections::HashMap;
 use mypthreads::sync::Shared;
 use crate::tc_log; // <--- NUEVO
@@ -104,9 +100,23 @@ impl City {
 
     pub fn update_spawner(&mut self) -> Vec<AgentType> {
         let mut new_agents = Vec::new();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         if self.time_ms >= self.spawner.next_vehicle_spawn_ms {
+            // ¡Es hora de crear un vehículo!
+
+            // Decidimos si es un carro o una ambulancia (ej. 10% de probabilidad de ambulancia)
+            let agent_type = if rng.random_bool(0.1) {
+                AgentType::Ambulance
+            } else {
+                AgentType::Car
+            };
+            new_agents.push(agent_type);
+
+            // Calculamos cuándo será el próximo spawn de vehículo.
+            // Usamos un valor aleatorio para que no sea predecible (ej. entre 1 y 4 segundos)
+          //DUPLICADO POR CONFLICTO, FIJARSE
+            let next_spawn_in = rng.random_range(1000..4000);
             let agent_type = if rng.gen_bool(0.1) { AgentType::Ambulance } else { AgentType::Car };
             new_agents.push(agent_type);
 
@@ -115,8 +125,10 @@ impl City {
             tc_log!("[Spawner] Próximo vehículo en {}ms (Tiempo: {})", next_spawn_in, self.spawner.next_vehicle_spawn_ms);
         }
 
+      //DUPLICADO POR CONFLICTO FIJARSE
         if self.time_ms >= self.spawner.next_boat_spawn_ms {
             new_agents.push(AgentType::Boat);
+            let next_spawn_in = rng.random_range(15000..30000); // Los barcos son menos frecuentes
             let next_spawn_in = rng.gen_range(15000..30000);
             self.spawner.next_boat_spawn_ms = self.time_ms + next_spawn_in;
             tc_log!("[Spawner] Próximo barco en {}ms (Tiempo: {})", next_spawn_in, self.spawner.next_boat_spawn_ms);
@@ -126,5 +138,10 @@ impl City {
     }
 }
 
+
 pub type SharedCity = Shared<City>;
-pub fn create_shared_city(city: City) -> SharedCity { mypthreads::sync::shared(city) }
+
+/// Crea una ciudad compartida usando nuestro mutex
+pub fn create_shared_city(city: City) -> SharedCity {
+    mypthreads::sync::shared(city)
+}

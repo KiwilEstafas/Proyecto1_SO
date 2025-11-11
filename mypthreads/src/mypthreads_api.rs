@@ -1,31 +1,53 @@
-
-//EL frontend que  llamaria la simulacion de la ciudad
 use crate::api_context;
 use crate::channels::SimpleMutex;
 use crate::runtime::ThreadRuntimeV2;
 use crate::signals::ThreadSignal;
-// Importamos la firma de la clausura actualizada
-use crate::thread::{ContextThreadEntry, SchedulerType, ThreadId, ThreadState};
-use once_cell::sync::Lazy;
-use std::sync::Mutex;
+use crate::thread::{ContextThreadEntry, SchedulerType, ThreadId};
+use std::sync::atomic::{AtomicBool, Ordering};
 
-//Crear la instancia global del runtime
-pub static RUNTIME: Lazy<Mutex<ThreadRuntimeV2>> = Lazy::new(|| Mutex::new(ThreadRuntimeV2::new()));
 
-//Parametros que se necesitan para la creacion de hilos
+//RUNTIME GLOBAL 
+// Debe inicializarse explícitamente con `runtime_init()` antes de usar.
+pub static mut RUNTIME: Option<(SimpleMutex, ThreadRuntimeV2)> = None;
+
+/// Inicializa el runtime global de mypthreads.
+/// Debe llamarse una sola vez!!!
+pub fn runtime_init() {
+    unsafe {
+        if RUNTIME.is_none() {
+            RUNTIME = Some((SimpleMutex::new(), ThreadRuntimeV2::new()));
+        }
+    }
+}
+
+/// Helper interno para obtener acceso mutable al runtime global.
+fn get_runtime_mut() -> &'static mut (SimpleMutex, ThreadRuntimeV2) {
+    unsafe {
+        match RUNTIME.as_mut() {
+            Some(t) => t,
+            None => panic!("RUNTIME no inicializado: llamá a runtime_init() antes de usar la API"),
+        }
+    }
+}
+
+/// Tipos de parámetros de planificación (scheduler)
 pub enum SchedulerParams {
     RoundRobin,
     Lottery { tickets: u32 },
     RealTime { deadline: u64 },
 }
 
+/// Crea un nuevo hilo manejado por mypthreads.
 pub fn my_thread_create(
     name: &str,
     params: SchedulerParams,
-    // --- CAMBIO: La firma de la clausura ahora acepta (tid, tickets) ---
     entry: ContextThreadEntry,
 ) -> ThreadId {
-    let mut runtime = RUNTIME.lock().unwrap();
+    let r = get_runtime_mut();
+    let (mutex, runtime) = &mut *r;
+
+    let current_tid = api_context::try_current_tid().unwrap_or(0);
+    mutex.lock(current_tid);
 
     let (sched, tickets, deadline) = match params {
         SchedulerParams::RoundRobin => (SchedulerType::RoundRobin, 1, None),
@@ -33,96 +55,115 @@ pub fn my_thread_create(
         SchedulerParams::RealTime { deadline } => (SchedulerType::RealTime, 0, Some(deadline)),
     };
 
-    // La función spawn también necesita ser actualizada para aceptar la nueva `entry`
-    runtime.spawn(name, sched, entry, tickets, deadline)
+    let id = runtime.spawn(name, sched, entry, tickets, deadline);
+
+    mutex.unlock(current_tid);
+    id
 }
 
-//ceder el procesador por las buenas
-pub fn my_thread_yield() {
-    api_context::ctx_yield();
-}
-
-//matar al hilo actual
-pub fn my_thread_end() {
-    api_context::ctx_exit();
-}
-
-//Esperar a que un hilo especifico termine para poder continuar
-pub fn my_thread_join(target_tid: ThreadId) -> ThreadSignal {
-    ThreadSignal::Join(target_tid)
-}
-
-//Desvincula un hilo, haciendo que sus recursos se liberen al terminar
+/// Marca un hilo como "detached"
 pub fn my_thread_detach(tid: ThreadId) {
-    if let Ok(mut runtime) = RUNTIME.lock() {
-        if let Some(thread) = runtime.threads.get_mut(&tid) {
-            thread.detached = true;
-            //println!("[API] Hilo {} marcado como detached.", tid);
-        }
+    let r = get_runtime_mut();
+    let (mutex, runtime) = &mut *r;
+    let current_tid = api_context::try_current_tid().unwrap_or(0);
+
+    mutex.lock(current_tid);
+    if let Some(thread) = runtime.threads.get_mut(&tid) {
+        thread.detached = true;
     }
+    mutex.unlock(current_tid);
 }
 
-//Cambia el scheduler que esta usando el hilo
-pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
-    if let Ok(mut runtime) = RUNTIME.lock() {
-        if let Some(thread) = runtime.threads.get_mut(&tid) {
-            let (sched, tickets, deadline) = match paramns {
-                SchedulerParams::RoundRobin => (SchedulerType::RoundRobin, 1, None),
-                SchedulerParams::Lottery { tickets } => (SchedulerType::Lottery, tickets, None),
-                SchedulerParams::RealTime { deadline } => {
-                    (SchedulerType::RealTime, 0, Some(deadline))
-                }
-            };
+/// Cambia los parámetros de planificación de un hilo
+pub fn my_thread_chsched(tid: ThreadId, params: SchedulerParams) {
+    let r = get_runtime_mut();
+    let (mutex, runtime) = &mut *r;
+    let current_tid = api_context::try_current_tid().unwrap_or(0);
 
-            thread.sched_type = sched;
-            thread.tickets = tickets;
-            thread.deadline = deadline;
-            //println!("[API] Planificación del hilo {} actualizada a {} tiquetes.", tid, tickets);
-        }
+    mutex.lock(current_tid);
+    if let Some(thread) = runtime.threads.get_mut(&tid) {
+        let (sched, tickets, deadline) = match params {
+            SchedulerParams::RoundRobin => (SchedulerType::RoundRobin, 1, None),
+            SchedulerParams::Lottery { tickets } => (SchedulerType::Lottery, tickets, None),
+            SchedulerParams::RealTime { deadline } => (SchedulerType::RealTime, 0, Some(deadline)),
+        };
+
+        thread.sched_type = sched;
+        thread.tickets = tickets;
+        thread.deadline = deadline;
     }
+    mutex.unlock(current_tid);
 }
 
-// --- my_thread_get_tickets HA SIDO ELIMINADA para evitar deadlocks ---
+/// Ejecuta el runtime por una cantidad de ciclos simulados
+pub fn run_simulation(cycles: usize) {
+    let r = get_runtime_mut();
+    let (mutex, runtime) = &mut *r;
+    let tid = api_context::try_current_tid().unwrap_or(0);
+
+    mutex.lock(tid);
+    runtime.run(cycles);
+    mutex.unlock(tid);
+}
+
+/// Desbloquea todos los hilos
+pub fn runtime_unblock_all() {
+    let r = get_runtime_mut();
+    let (_mutex, runtime) = &mut *r;
+    runtime.unblock_all_threads();
+}
+
+/// Ejecuta el scheduler por `cycles` ciclos
+pub fn runtime_run_cycles(cycles: usize) {
+    let r = get_runtime_mut();
+    let (_mutex, runtime) = &mut *r;
+    runtime.run(cycles);
+}
+
 
 pub struct MyMutex {
-    pub internal: SimpleMutex,
+    locked: AtomicBool,
 }
 
-//Inicia un mutex
-pub fn my_mutex_init() -> MyMutex {
-    MyMutex {
-        internal: SimpleMutex::new(),
+impl MyMutex {
+    pub fn new() -> Self {
+        Self {
+            locked: AtomicBool::new(false),
+        }
+    }
+
+    /// Forzado para desbloquear (solo debe usarlo el hilo `main`)
+    pub fn force_unlock(&self) {
+        self.locked.store(false, Ordering::Release);
     }
 }
 
-//Bloquea el mutex, esperando si se ocupa 
-pub fn my_mutex_lock(mutex: &MyMutex) -> ThreadSignal {
-    let mutex_addr = &mutex.internal as *const _ as usize;
-    ThreadSignal::MutexLock(mutex_addr)
+/// Inicializa un nuevo mutex cooperativo
+pub fn my_mutex_init() -> MyMutex {
+    MyMutex::new()
 }
 
-//Liberar un mutex
-pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal {
-    let mutex_addr = &mutex.internal as *const _ as usize;
-    ThreadSignal::MutexUnlock(mutex_addr)
+/// Intenta adquirir el lock cooperativamente
+pub fn my_mutex_lock(mtx: &MyMutex) -> ThreadSignal {
+    if mtx.locked.swap(true, Ordering::Acquire) {
+        // Ya estaba bloqueado, entonces devolvemos señal para que el runtime pause el hilo
+        ThreadSignal::MutexLock(mtx as *const _ as usize)
+    } else {
+        // Lock adquirido inmediatamente
+        ThreadSignal::Continue
+    }
 }
 
-//Bloquear un utex sin esperar 
-pub fn my_mutex_trylock(mutex: &MyMutex) -> bool {
-    let tid_opt = api_context::try_current_tid();
-    let tid = tid_opt.unwrap_or(0);
-    //eprintln!("[my_mutex_trylock] try_current_tid() -> {:?}, using tid={:?}", tid_opt, tid);
-    mutex.internal.try_lock(tid)
+/// Intenta adquirir el lock sin bloquearse.
+pub fn my_mutex_trylock(mtx: &MyMutex) -> bool {
+    !mtx.locked.swap(true, Ordering::Acquire)
 }
 
-
-//Destuye un mutex
-pub fn my_mutex_destroy(_mutex: &mut MyMutex) {
-    // En Rust, la memoria se libera automáticamente cuando el objeto sale del scope (RAII).
-    // Esta función se mantiene por compatibilidad con la API de pthreads, pero no necesita hacer nada.
+/// Libera el lock.
+pub fn my_mutex_unlock(mtx: &MyMutex) -> ThreadSignal {
+    mtx.locked.store(false, Ordering::Release);
+    ThreadSignal::Continue
 }
 
-// Esta función ya no es necesaria en el `main` pero puede ser útil para pruebas.
-pub fn run_simulation(cycles: usize) {
-    RUNTIME.lock().unwrap().run(cycles);
-}
+/// Destruye el mutex (no hace nada porque no hay recursos dinámicos)
+pub fn my_mutex_destroy(_mtx: &mut MyMutex) {}

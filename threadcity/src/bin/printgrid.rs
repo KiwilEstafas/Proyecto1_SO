@@ -1,12 +1,3 @@
-//! solo para revisar que el Grid funciona bien
-//! - Grid ≥ 25 cuadras
-//! - grid.size() ≥ 25
-//! - Listar al menos 25 celdas
-//!
-//! Uso:
-//!   cargo run --bin printgrid
-//!   cargo run --bin printgrid -- 6 5   # filas=6, cols=5
-
 use std::env;
 use threadcity::model::Grid; 
 

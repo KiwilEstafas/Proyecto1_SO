@@ -1,5 +1,3 @@
-// camion de carga que entrega insumos a la planta
-
 use super::{Agent, Vehicle};
 use crate::model::{Coord, SupplyKind};
 use mypthreads::ThreadId;

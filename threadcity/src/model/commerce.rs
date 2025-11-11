@@ -1,5 +1,3 @@
-// comercio estatico
-
 use super::Coord;
 
 #[derive(Debug, Clone)]

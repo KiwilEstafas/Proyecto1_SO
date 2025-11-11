@@ -1,5 +1,3 @@
-//! runtime v2 que usa cambio de contexto real
-
 use crate::channels::ThreadChannels;
 use crate::context_wrapper::ThreadContext;
 use crate::sched;
@@ -81,12 +79,8 @@ impl ThreadRuntimeV2 {
     }
 
     /// Mueve TODOS los hilos de la cola de bloqueados a la cola de listos.
-    /// Esto es útil al inicio de un nuevo paso de simulación para darles a los
-    /// hilos la oportunidad de reintentar la acción por la que se bloquearon.
     pub fn unblock_all_threads(&mut self) {
         // Tomamos todos los hilos bloqueados y los movemos a la cola de listos.
-        // .drain(..) es eficiente porque vacía el vector `blocked` sin necesidad
-        // de reasignar memoria.
         for tid in self.blocked.drain(..) {
             if let Some(thread) = self.threads.get_mut(&tid) {
                 thread.state = ThreadState::Ready;
@@ -97,10 +91,8 @@ impl ThreadRuntimeV2 {
                 //);
             }
         }
-        // Después de esto, self.blocked estará vacío.
     }
 
-    /// ejecuta un quantum - version con contextos
     pub fn run_once(&mut self) {
         self.now_ms += 10;
         let Some(tid) = self.ready.pop_front() else {
@@ -151,7 +143,6 @@ impl ThreadRuntimeV2 {
                 let thread = self.threads.get_mut(&tid).unwrap();
                 thread.state = ThreadState::Terminated;
 
-                //MOdificacion papra el join
                 //Despierta TODOS los hilos que estaban esperando por este en cuestion
                 let joiners_unblock = thread.joiners.clone(); //Es mejor clonar para evitar problemas de borrow
                 for joiner_tid in joiners_unblock {

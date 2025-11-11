@@ -6,7 +6,6 @@ use crate::signals::ThreadSignal;
 
 use std::cell::UnsafeCell;
 use std::ops::{Deref, DerefMut};
-use std::sync::atomic::Ordering;
 use std::sync::Arc;
 
 /// Contenedor thread-safe para datos compartidos usando MyMutex.
@@ -55,7 +54,7 @@ impl<T> MyMutexCell<T> {
     /// Bypassea el sistema de señales porque el `main` no es un hilo gestionado.
     /// Asume que el `main` thread tiene el tid `0`.
     pub fn force_unlock_for_main(&self) {
-        self.mtx.internal.force_unlock();
+        self.mtx.force_unlock();
     }
 
     /// Paso 2: Entrar a la sección crítica (después de que el runtime otorgó el lock).
