@@ -57,7 +57,7 @@ pub fn my_thread_detach(tid: ThreadId) {
     if let Ok(mut runtime) = RUNTIME.lock() {
         if let Some(thread) = runtime.threads.get_mut(&tid) {
             thread.detached = true;
-            println!("[API] Hilo {} marcado como detached.", tid);
+            //println!("[API] Hilo {} marcado como detached.", tid);
         }
     }
 }
@@ -77,7 +77,7 @@ pub fn my_thread_chsched(tid: ThreadId, paramns: SchedulerParams) {
             thread.sched_type = sched;
             thread.tickets = tickets;
             thread.deadline = deadline;
-            println!("[API] Planificación del hilo {} actualizada a {} tiquetes.", tid, tickets);
+            //println!("[API] Planificación del hilo {} actualizada a {} tiquetes.", tid, tickets);
         }
     }
 }
@@ -111,7 +111,7 @@ pub fn my_mutex_unlock(mutex: &MyMutex) -> ThreadSignal {
 pub fn my_mutex_trylock(mutex: &MyMutex) -> bool {
     let tid_opt = api_context::try_current_tid();
     let tid = tid_opt.unwrap_or(0);
-    eprintln!("[my_mutex_trylock] try_current_tid() -> {:?}, using tid={:?}", tid_opt, tid);
+    //eprintln!("[my_mutex_trylock] try_current_tid() -> {:?}, using tid={:?}", tid_opt, tid);
     mutex.internal.try_lock(tid)
 }
 

@@ -145,14 +145,10 @@ fn main() {
                 let mut tids = Vec::new();
                 for plant in &city_lock.plants {
                     if plant.status == PlantStatus::AtRisk {
-                        if let Some(needed_supply) = plant.requires.first() {
-                            println!(
-                                "🚨 EMERGENCIA: Planta {} necesita {:?} urgentemente!",
-                                plant.id, needed_supply.kind
-                            );
+                        if let Some(needed_supply) = plant.active_risk_kind(city_lock.current_time()) {
                             for agent_info in city_lock.agents.values() {
                                 if let AgentType::CargoTruck(cargo) = agent_info.agent_type {
-                                    if cargo == needed_supply.kind {
+                                    if cargo == needed_supply {
                                         tids.push(agent_info.vehicle.tid);
                                     }
                                 }

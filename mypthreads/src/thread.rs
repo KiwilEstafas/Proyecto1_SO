@@ -101,7 +101,7 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
     ThreadGlobalContext::init(tid, channels.clone());
     crate::api_context::init_thread_context(tid, channels);
 
-    println!("[Hilo {}] inicializado correctamente", tid);
+    // println!("[Hilo {}] inicializado correctamente", tid);
 
     // FASE 2: Loop de Ejecución
     loop {
@@ -112,20 +112,20 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
             thread.execute_step(current_tickets)
         };
 
-        println!("[Hilo {}] execute_step retornó: {:?}", tid, signal);
+        // println!("[Hilo {}] execute_step retornó: {:?}", tid, signal);
 
         // Convertir la señal del hilo en una respuesta para el Runtime
         let response = match signal {
             ThreadSignal::Yield | ThreadSignal::Continue => {
-                println!("[Hilo {}] preparando yield al runtime", tid);
+                // println!("[Hilo {}] preparando yield al runtime", tid);
                 ThreadResponse::Yield
             }
             ThreadSignal::Block => {
-                println!("[Hilo {}] preparando block", tid);
+                // println!("[Hilo {}] preparando block", tid);
                 ThreadResponse::Block
             }
             ThreadSignal::Exit => {
-                println!("[Hilo {}] preparando exit", tid);
+                // println!("[Hilo {}] preparando exit", tid);
                 ThreadResponse::Exit
             }
             // Las demás señales se pasan directamente
@@ -143,7 +143,7 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
         // --- El hilo se "congela" aquí hasta que el Runtime lo reanude ---
 
         // Cuando volvemos, el runtime nos ha despertado
-        println!("[Hilo {}] despertado por el runtime", tid);
+        // println!("[Hilo {}] despertado por el runtime", tid);
 
         if is_exit {
             eprintln!("[Hilo {}] ERROR: runtime despertó un hilo terminado", tid);

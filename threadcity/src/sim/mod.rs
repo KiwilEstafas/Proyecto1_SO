@@ -99,6 +99,8 @@ impl City {
     /// Verifica deadlines de las plantas. Si una falla, imprime un mensaje y la reinicia.
     pub fn check_plant_deadlines(&mut self) {
         for plant in &mut self.plants {
+            let _ = plant.tick_emergency(self.time_ms);
+
             // Hacemos una copia de los requerimientos para evitar problemas de borrowing.
             let requires = plant.requires.clone();
 

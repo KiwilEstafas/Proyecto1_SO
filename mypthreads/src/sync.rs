@@ -100,7 +100,7 @@ impl<T> MyMutexCell<T> {
     /// contexto de hilo inicializado (puede llamarse desde cualquier hilo).
     pub fn try_enter(&self) -> Option<MyGuard<'_, T>> {
         let ok = my_mutex_trylock(&self.mtx);
-        println!("try_enter: try_lock returned {}", ok);
+        // println!("try_enter: try_lock returned {}", ok);
         if ok {
             Some(MyGuard {
                 cell: self,

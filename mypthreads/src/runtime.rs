@@ -50,11 +50,11 @@ impl ThreadRuntimeV2 {
         self.threads.insert(tid, Box::new(thread));
         self.ready.push_back(tid);
 
-        println!(
-            "[Runtime] creado hilo {} (total: {})",
-            tid,
-            self.threads.len()
-        );
+        //println!(
+        //    "[Runtime] creado hilo {} (total: {})",
+        //    tid,
+        //    self.threads.len()
+        //);
 
         tid
     }
@@ -65,7 +65,7 @@ impl ThreadRuntimeV2 {
             let unblocked_tid = self.blocked.remove(pos);
             self.threads.get_mut(&unblocked_tid).unwrap().state = ThreadState::Ready;
             self.ready.push_back(unblocked_tid);
-            println!("[Runtime] Hilo {} desbloqueado.", unblocked_tid);
+            //println!("[Runtime] Hilo {} desbloqueado.", unblocked_tid);
         }
     }
 
@@ -91,10 +91,10 @@ impl ThreadRuntimeV2 {
             if let Some(thread) = self.threads.get_mut(&tid) {
                 thread.state = ThreadState::Ready;
                 self.ready.push_back(tid);
-                println!(
-                    "[Runtime] Hilo {} desbloqueado por el ciclo de simulación.",
-                    tid
-                );
+                //println!(
+                //    "[Runtime] Hilo {} desbloqueado por el ciclo de simulación.",
+                //    tid
+                //);
             }
         }
         // Después de esto, self.blocked estará vacío.
@@ -104,11 +104,10 @@ impl ThreadRuntimeV2 {
     pub fn run_once(&mut self) {
         self.now_ms += 10;
         let Some(tid) = self.ready.pop_front() else {
-            println!("[Runtime] no hay hilos ready");
+            //println!("[Runtime] no hay hilos ready");
             return;
         };
 
-        println!("[Runtime] seleccionado hilo {} para ejecutar", tid);
 
         // obtener el hilo
         let thread = self.threads.get_mut(&tid).expect("hilo debe existir");
@@ -132,23 +131,23 @@ impl ThreadRuntimeV2 {
         // procesar respuesta
         let response = unsafe { ThreadResponse::unpack(response_data) };
 
-        println!("[Runtime] hilo {} retornó: {:?}", tid, response);
+        //println!("[Runtime] hilo {} retornó: {:?}", tid, response);
 
         match response {
             ThreadResponse::Yield => {
-                println!("[Runtime] hilo {} hizo yield, reencolando", tid);
+                //println!("[Runtime] hilo {} hizo yield, reencolando", tid);
                 let thread = self.threads.get_mut(&tid).unwrap();
                 thread.state = ThreadState::Ready;
                 self.ready.push_back(tid);
             }
             ThreadResponse::Block => {
-                println!("[Runtime] hilo {} se bloqueó", tid);
+                // println!("[Runtime] hilo {} se bloqueó", tid);
                 let thread = self.threads.get_mut(&tid).unwrap();
                 thread.state = ThreadState::Blocked;
                 self.blocked.push(tid);
             }
             ThreadResponse::Exit => {
-                println!("[Runtime] hilo {} terminó", tid);
+                //println!("[Runtime] hilo {} terminó", tid);
                 let thread = self.threads.get_mut(&tid).unwrap();
                 thread.state = ThreadState::Terminated;
 
@@ -169,13 +168,13 @@ impl ThreadRuntimeV2 {
                 if let Some(target) = self.threads.get(&target_tid) {
                     if target.state == ThreadState::Terminated {
                         should_block = false;
-                        println!(
-                            "[Runtime] Hilo {} no se bloquea, {} ya terminó.",
-                            current_tid, target_tid
-                        );
+                        //println!(
+                        //    "[Runtime] Hilo {} no se bloquea, {} ya terminó.",
+                        //    current_tid, target_tid
+                        //);
                         self.ready.push_back(current_tid);
                     } else {
-                        println!("[Runtime] Hilo {} esperando a {}.", current_tid, target_tid);
+                        //println!("[Runtime] Hilo {} esperando a {}.", current_tid, target_tid);
                         self.threads
                             .get_mut(&target_tid)
                             .unwrap()
@@ -200,16 +199,16 @@ impl ThreadRuntimeV2 {
                 // `lock` ahora devuelve `true` si se debe bloquear
                 if mutex.lock(current_tid) {
                     // El lock no se pudo adquirir, bloquear el hilo.
-                    println!(
-                        "[Runtime] Hilo {} se bloquea esperando un mutex.",
-                        current_tid
-                    );
+                    //println!(
+                    //    "[Runtime] Hilo {} se bloquea esperando un mutex.",
+                    //    current_tid
+                    //);
                     let thread = self.threads.get_mut(&current_tid).unwrap();
                     thread.state = ThreadState::Blocked;
                     self.blocked.push(current_tid);
                 } else {
                     // El lock se adquirió, el hilo sigue listo.
-                    println!("[Runtime] Hilo {} adquirió un mutex.", current_tid);
+                    //println!("[Runtime] Hilo {} adquirió un mutex.", current_tid);
                     self.ready.push_back(current_tid);
                 }
             }
@@ -219,10 +218,10 @@ impl ThreadRuntimeV2 {
 
                 // `unlock` devuelve el siguiente hilo a despertar, si lo hay
                 if let Some(unblocked_tid) = mutex.unlock(current_tid) {
-                    println!(
-                        "[Runtime] Mutex liberado, despertando al hilo {}.",
-                        unblocked_tid
-                    );
+                    //println!(
+                    //    "[Runtime] Mutex liberado, despertando al hilo {}.",
+                    //    unblocked_tid
+                    //);
                     self.unblock_thread(unblocked_tid);
                 }
 
@@ -235,11 +234,10 @@ impl ThreadRuntimeV2 {
     /// ejecuta multiples ciclos
     pub fn run(&mut self, cycles: usize) {
         for i in 0..cycles {
-            println!("\n[Runtime] === Ciclo {} ===", i + 1);
             self.run_once();
 
             if self.ready.is_empty() && self.blocked.is_empty() {
-                println!("[Runtime] no hay más hilos para ejecutar");
+                //println!("[Runtime] no hay más hilos para ejecutar");
                 break;
             }
         }
