@@ -3,15 +3,15 @@ use gtk::{
     Application, ApplicationWindow, Orientation, TextView, TextBuffer, DrawingArea, ScrolledWindow,
     Box as GtkBox, ListStore, TreeView, TreeViewColumn, CellRendererText,
 };
-use glib::source::PRIORITY_DEFAULT;
 use once_cell::sync::OnceCell;
 use std::thread;
+use std::sync::mpsc; // Importar el canal estándar de Rust
 
 mod ui_logger;
 use ui_logger::UiLogger;
 
-// Canal global para el logger (sin Mutex real)
-static LOG_SENDER: OnceCell<glib::Sender<String>> = OnceCell::new();
+// Canal global para el logger, ahora usando el Sender de mpsc.
+static LOG_SENDER: OnceCell<mpsc::Sender<String>> = OnceCell::new();
 
 // Función que instalará threadcity como logger de la UI
 fn ui_log_fn(msg: &str) {
@@ -115,12 +115,17 @@ fn main() {
         vbox.append(&scroll_table);
         window.set_child(Some(&vbox));
 
-        // === Canal GLib para recibir logs desde cualquier hilo ===
+        // === Canal para recibir logs desde cualquier hilo usando std::sync::mpsc ===
         let ui_logger = UiLogger::init(text_buffer.clone());
-        let (sender, receiver) = MainContext::channel::<String>(PRIORITY_DEFAULT);
-        LOG_SENDER.set(sender).ok();                 // instala sender global
-        receiver.attach(None, move |line: String| {  // actualiza TextView en el hilo UI
-            ui_logger.log(&line);
+        let (sender, receiver) = mpsc::channel::<String>();
+        LOG_SENDER.set(sender).ok(); // instala sender global
+
+        // Se sondea el receptor desde el hilo principal de glib cada 50ms
+        glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
+            // Se drenan todos los mensajes pendientes en el canal
+            for line in receiver.try_iter() {
+                ui_logger.log(&line);
+            }
             glib::ControlFlow::Continue
         });
 
