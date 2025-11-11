@@ -12,7 +12,6 @@ pub trait Agent {
     fn priority(&self) -> u8; 
 }
 
-// helper para poder hacer downcast desde Box<dyn Agent>
 pub trait AgentDowncast: Agent {
     fn as_any(&self) -> &dyn Any;
 }

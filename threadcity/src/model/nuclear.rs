@@ -11,7 +11,7 @@ pub enum SupplyKind {
 #[derive(Debug, Clone, Copy)]
 pub struct SupplySpec {
     pub kind: SupplyKind,
-    pub deadline_ms: u64, // se respeta
+    pub deadline_ms: u64, 
     pub period_ms: u64,
 }
 
@@ -38,9 +38,7 @@ pub struct NuclearPlant {
 
     // Última entrega por insumo
     last_delivery_ms: HashMap<SupplyKind, u64>,
-
-    // ===== NUEVO: estado para evitar spam y llevar el insumo real =====
-    /// true si YA se notificó emergencia para ese insumo (debounce por tick)
+    
     risk_active: HashMap<SupplyKind, bool>,
     /// último timestamp de emergencia (informativo)
     last_emergency_at_ms: Option<u64>,
@@ -114,9 +112,6 @@ impl NuclearPlant {
         self.last_emergency_at_ms = None;
     }
 
-    // ===================== LÓGICA INTERNA =====================
-
-    /// Devuelve Some(insumo) si hay déficit. Con guard=true nos anticipamos al hard deadline.
     fn current_deficit(&self, now_ms: u64, guard: bool) -> Option<SupplyKind> {
         for spec in &self.requires {
             let last = self.get_last_delivery_time(&spec.kind);
@@ -137,7 +132,7 @@ impl NuclearPlant {
         None
     }
 
-    /// Eleva emergencia SOLO en transición (debounce). Devuelve el insumo si se elevó nueva.
+    /// Eleva emergencia SOLO en transición. Devuelve el insumo si se elevó nueva.
     pub fn maybe_raise_emergency(&mut self, now_ms: u64) -> Option<SupplyKind> {
         match self.current_deficit(now_ms, true) {
             None => {
@@ -185,8 +180,6 @@ impl NuclearPlant {
         self.maybe_raise_emergency(now_ms)
     }
 
-    /// Helper público para saber el insumo actualmente en riesgo (si lo hay),
-    /// sin imprimir ni cambiar estado (sirve para elegir camión correcto).
     pub fn active_risk_kind(&self, now_ms: u64) -> Option<SupplyKind> {
         // Si hay algún flag activo, úsalo; si no, consulta el déficit actual sin guard.
         if let Some((&k, _)) = self.risk_active.iter().find(|(_, v)| **v) {

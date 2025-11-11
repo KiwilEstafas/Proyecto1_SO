@@ -1,5 +1,3 @@
-// barco que se mueve sobre el rio
-
 use super::{Agent, Vehicle};
 use crate::model::Coord;
 use mypthreads::ThreadId;

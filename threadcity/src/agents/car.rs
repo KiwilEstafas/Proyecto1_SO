@@ -1,5 +1,3 @@
-// auto comun
-
 use super::{Agent, Vehicle};
 use crate::model::Coord;
 use mypthreads::ThreadId;

@@ -1,7 +1,3 @@
-// threadcity/src/model/bridge.rs
-// Puentes con diferentes reglas de tráfico
-// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
-
 use mypthreads::sync::{shared, Shared};
 use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
@@ -35,7 +31,7 @@ enum TrafficLightState {
     SouthGreen,
 }
 
-// El struct que guardaremos en la cola. Necesita `Ord`.
+// El struct que guardaremos en la cola. 
 #[derive(Debug, Eq, PartialEq)]
 struct WaitingVehicle {
     priority: u8,
@@ -61,10 +57,10 @@ pub struct Bridge {
     pub row: u32,
     pub capacity: u32,
 
-    // Estado protegido - usa Shared<MyMutexCell<...>>
+    // Estado protegido 
     state: Shared<BridgeState>,
 
-    // Cola de espera con prioridades - usa Shared<MyMutexCell<...>>
+    // Cola de espera con prioridades 
     wait_queue: Shared<BinaryHeap<WaitingVehicle>>,
 
     // Configuración específica
@@ -135,9 +131,6 @@ impl Bridge {
     }
 
     /// Actualizar el estado del puente (para semáforos)
-    ///
-    /// NOTA: Esta función es llamada desde el hilo principal de simulación,
-    /// no desde hilos mypthreads, por lo que usamos try_enter
     pub fn update(&mut self, current_time_ms: u64) {
         if self.bridge_type != BridgeType::TrafficLight {
             return;
@@ -166,9 +159,6 @@ impl Bridge {
     }
 
     /// Intentar cruzar el puente (vehículo)
-    ///
-    /// IMPORTANTE: Esta función debe ser llamada desde hilos mypthreads
-    /// Retorna true si el vehículo puede cruzar inmediatamente
     pub fn try_cross(&self, tid: ThreadId, priority: u8, direction: TrafficDirection) -> bool {
         // Usar try_enter (no bloqueante)
         if let Some(mut state) = self.state.try_enter() {

@@ -7,8 +7,6 @@ use crate::JoinHandle;
 use context::Transfer;
 
 pub type ThreadId = u32;
-
-// --- CAMBIO: La clausura ahora acepta (tid, tickets) ---
 pub type ContextThreadEntry = Box<dyn FnMut(ThreadId, u32) -> ThreadSignal + Send + 'static>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -77,10 +75,8 @@ impl MyThread {
     }
 }
 
-/// EL WRAPPER REAL
-/// Se ejecuta en la pila del nuevo hilo y maneja la comunicación con el Runtime.
+/// WRAPPER: Se ejecuta en la pila del nuevo hilo y maneja la comunicación con el Runtime.
 extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
-    // FASE 1: Inicialización
     // Desempacamos el mensaje inicial que nos envió el Runtime
     let (thread_ptr, channels, tid, mut current_tickets) =
         if let TransferMessage::Init {
@@ -103,9 +99,8 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
 
     // println!("[Hilo {}] inicializado correctamente", tid);
 
-    // FASE 2: Loop de Ejecución
     loop {
-        // Ejecutar un paso de la lógica del hilo (ej. vehicle_logic)
+        // Ejecutar un paso de la lógica del hilo 
         // Pasamos los tiquetes que recibimos del Runtime
         let signal = unsafe {
             let thread = &mut *thread_ptr;
@@ -139,8 +134,6 @@ extern "C" fn thread_entry_wrapper(mut transfer: Transfer) -> ! {
 
         // Devolvemos el control (y la respuesta) al Runtime
         transfer = unsafe { transfer.context.resume(response_data) };
-
-        // --- El hilo se "congela" aquí hasta que el Runtime lo reanude ---
 
         // Cuando volvemos, el runtime nos ha despertado
         // println!("[Hilo {}] despertado por el runtime", tid);

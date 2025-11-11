@@ -1,5 +1,3 @@
-// Configuracion de ThreadCity
-
 use crate::model::*;
 use crate::sim::City;
 

@@ -1,12 +1,10 @@
-// wrapper minimalista sobre el crate context
-
 use context::{Context, Transfer};
 use context::stack::ProtectedFixedSizeStack;
 
 const STACK_SIZE: usize = 8192; // 8kb por hilo
 
 pub struct ThreadContext {
-    pub context: Option<Context>, // CAMBIADO a pub para acceso directo
+    pub context: Option<Context>, 
     _stack: Box<ProtectedFixedSizeStack>,
 }
 
@@ -25,7 +23,7 @@ impl ThreadContext {
         }
     }
 
-    /// resume con data
+    /// resume con informacion 
     pub unsafe fn resume_with_data(&mut self, data: usize) -> usize {
         let ctx = self.context.take()
             .expect("context debe existir");

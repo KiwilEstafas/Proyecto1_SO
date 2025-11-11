@@ -1,5 +1,3 @@
-//! estructuras para pasar datos entre contextos via Transfer.data
-
 use crate::thread::{ThreadId, MyThread};
 use crate::channels::ThreadChannels;
 

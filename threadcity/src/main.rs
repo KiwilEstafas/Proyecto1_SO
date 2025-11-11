@@ -1,9 +1,8 @@
-// threadcity/src/main.rs
-// VERSIÓN FINAL CORREGIDA
-
-// --- IMPORTACIONES ---
 use mypthreads::{
-    mypthreads_api::{my_thread_chsched, my_thread_create, SchedulerParams, RUNTIME},
+    mypthreads_api::{
+        my_thread_chsched, my_thread_create, runtime_init, runtime_run_cycles, runtime_unblock_all,
+        SchedulerParams,
+    },
     ThreadId, ThreadSignal,
 };
 use rand::{prelude::*, rng};
@@ -12,11 +11,11 @@ use std::thread;
 use std::time::Duration;
 use threadcity::{
     create_city, create_shared_city, nearest_bridge, AgentInfo, AgentState, AgentType, Ambulance,
-    Boat, Car, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind,
+    Boat, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind,
     TrafficDirection, Vehicle,
 };
 
-// --- CONTADOR GLOBAL DE IDs ---
+
 static NEXT_AGENT_ID: AtomicU32 = AtomicU32::new(301);
 fn get_next_agent_id() -> u32 {
     NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed)
@@ -24,11 +23,11 @@ fn get_next_agent_id() -> u32 {
 
 fn main() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
-    println!("║           ThreadCity - Simulación Preemptiva              ║");
-    println!("║          [CORREGIDO: Usando force_unlock_for_main]        ║");
+    println!("║           ThreadCity - Simulación                           ║");
     println!("╚════════════════════════════════════════════════════════════╝\n");
 
     // --- SETUP ---
+    runtime_init();
     let (city, layout) = create_city();
     let shared_city = create_shared_city(city);
 
@@ -145,7 +144,9 @@ fn main() {
                 let mut tids = Vec::new();
                 for plant in &city_lock.plants {
                     if plant.status == PlantStatus::AtRisk {
-                        if let Some(needed_supply) = plant.active_risk_kind(city_lock.current_time()) {
+                        if let Some(needed_supply) =
+                            plant.active_risk_kind(city_lock.current_time())
+                        {
                             for agent_info in city_lock.agents.values() {
                                 if let AgentType::CargoTruck(cargo) = agent_info.agent_type {
                                     if cargo == needed_supply {
@@ -169,8 +170,8 @@ fn main() {
             }
         }
 
-        RUNTIME.lock().unwrap().unblock_all_threads();
-        RUNTIME.lock().unwrap().run(SCHEDULER_CYCLES_PER_STEP);
+        runtime_unblock_all();
+        runtime_run_cycles(SCHEDULER_CYCLES_PER_STEP);
 
         thread::sleep(Duration::from_millis(50));
     }
@@ -198,7 +199,6 @@ fn main() {
 }
 
 // --- FUNCIONES SPAWN ---
-// (Estas funciones no necesitan cambios)
 fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::sync::Arc<AtomicU32>) {
     counter.fetch_add(1, Ordering::Relaxed);
     let mut rng = rng();
@@ -647,8 +647,8 @@ fn boat_logic(
             }
 
             drop(city_lock);
-            city.force_unlock_for_main();  // ✅ CAMBIADO
-            return ThreadSignal::Yield;     // ✅ CAMBIADO
+            city.force_unlock_for_main(); // ✅ CAMBIADO
+            return ThreadSignal::Yield; // ✅ CAMBIADO
         }
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
@@ -694,11 +694,11 @@ fn move_towards(pos: &mut Coord, dest: Coord, layout: &CityLayout) {
 }
 
 fn random_position(rng: &mut impl Rng, layout: &CityLayout) -> Coord {
-    let row = rng.gen_range(0..layout.grid_rows);
-    let col = if rng.gen_bool(0.5) {
-        rng.gen_range(0..layout.river_column)
+    let row = rng.random_range(0..layout.grid_rows);
+    let col = if rng.random_bool(0.5) {
+        rng.random_range(0..layout.river_column)
     } else {
-        rng.gen_range((layout.river_column + 1)..layout.grid_cols)
+        rng.random_range((layout.river_column + 1)..layout.grid_cols)
     };
     Coord::new(row, col)
 }
@@ -713,7 +713,7 @@ fn random_destination(rng: &mut impl Rng, layout: &CityLayout, origin: Coord) ->
 }
 
 fn random_supply_kind(rng: &mut impl Rng) -> SupplyKind {
-    if rng.gen_bool(0.5) {
+    if rng.random_bool(0.5) {
         SupplyKind::Radioactive
     } else {
         SupplyKind::Water

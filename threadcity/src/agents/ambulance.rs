@@ -1,4 +1,3 @@
-// ambulancia con prioridad superior
 use mypthreads::ThreadId;
 
 use super::{Agent, Vehicle};

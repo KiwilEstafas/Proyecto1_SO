@@ -1,5 +1,3 @@
-// Biblioteca ThreadCity - Simulacion de ciudad con hilos preemptivos
-
 pub mod model;
 pub mod agents;
 pub mod sim;

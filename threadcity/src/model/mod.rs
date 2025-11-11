@@ -1,5 +1,3 @@
-// Modulo del modelo de datos de ThreadCity
-
 mod grid;
 mod coord;
 mod river;

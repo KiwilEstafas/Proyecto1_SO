@@ -1,11 +1,7 @@
-// threadcity/src/sim/mod.rs
-// Sistema de simulacion de ThreadCity
-// REFACTORIZADO: Usa MyMutex en lugar de std::sync::Mutex
-
 use crate::model::*;
 use crate::{AgentInfo, AgentType};
 use mypthreads::thread::ThreadId;
-use rand::{rng, seq::IndexedRandom, Rng};
+use rand::{Rng};
 use std::collections::HashMap;
 use mypthreads::sync::Shared;
 
@@ -134,14 +130,14 @@ impl City {
 
     pub fn update_spawner(&mut self) -> Vec<AgentType> {
         let mut new_agents = Vec::new();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
 
         // --- Lógica para Vehículos ---
         if self.time_ms >= self.spawner.next_vehicle_spawn_ms {
             // ¡Es hora de crear un vehículo!
 
             // Decidimos si es un carro o una ambulancia (ej. 10% de probabilidad de ambulancia)
-            let agent_type = if rng.gen_bool(0.1) {
+            let agent_type = if rng.random_bool(0.1) {
                 AgentType::Ambulance
             } else {
                 AgentType::Car
@@ -150,7 +146,7 @@ impl City {
 
             // Calculamos cuándo será el próximo spawn de vehículo.
             // Usamos un valor aleatorio para que no sea predecible (ej. entre 1 y 4 segundos)
-            let next_spawn_in = rng.gen_range(1000..4000);
+            let next_spawn_in = rng.random_range(1000..4000);
             self.spawner.next_vehicle_spawn_ms = self.time_ms + next_spawn_in;
             println!(
                 "[Spawner] Próximo vehículo en {}ms (Tiempo: {})",
@@ -161,7 +157,7 @@ impl City {
         // --- Lógica para Barcos ---
         if self.time_ms >= self.spawner.next_boat_spawn_ms {
             new_agents.push(AgentType::Boat);
-            let next_spawn_in = rng.gen_range(15000..30000); // Los barcos son menos frecuentes
+            let next_spawn_in = rng.random_range(15000..30000); // Los barcos son menos frecuentes
             self.spawner.next_boat_spawn_ms = self.time_ms + next_spawn_in;
             println!(
                 "[Spawner] Próximo barco en {}ms (Tiempo: {})",
@@ -173,11 +169,10 @@ impl City {
     }
 }
 
-/// Estructura compartida de la ciudad para hilos
-/// CAMBIO IMPORTANTE: Ahora usa SharedMutex (MyMutex) en lugar de std::sync::Mutex
+
 pub type SharedCity = Shared<City>;
 
 /// Crea una ciudad compartida usando nuestro mutex
 pub fn create_shared_city(city: City) -> SharedCity {
-    mypthreads::sync::shared(city) // La creación también usa la función correcta
+    mypthreads::sync::shared(city)
 }
