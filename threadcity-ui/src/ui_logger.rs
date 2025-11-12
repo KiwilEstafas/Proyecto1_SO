@@ -1,5 +1,5 @@
 use gtk::TextBuffer;
-use gtk::prelude::*; // <-- IMPORTANTE: habilita TextBufferExt (insert, end_iter)
+use gtk::prelude::*;
 use std::cell::RefCell;
 use std::rc::Rc;
 

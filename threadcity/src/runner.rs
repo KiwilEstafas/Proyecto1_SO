@@ -1,5 +1,3 @@
-// In: threadcity/src/runner.rs
-
 use mypthreads::{
     mypthreads_api::{
         my_thread_chsched, my_thread_create, runtime_run_cycles, runtime_unblock_all,

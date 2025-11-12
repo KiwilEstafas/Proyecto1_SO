@@ -1,5 +1,3 @@
-// In: src/ui/layout.rs
-
 use gtk::prelude::*;
 use gtk::{
     Application, ApplicationWindow, Orientation, TextView, TextBuffer, DrawingArea, ScrolledWindow,

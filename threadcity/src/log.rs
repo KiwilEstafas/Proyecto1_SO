@@ -1,6 +1,5 @@
-// threadcity/src/log.rs
-// Logger mínimo sin std::sync::Mutex. Por defecto imprime a consola.
-// Se puede redirigir con set_logger(fn(&str)) antes de correr la simulación.
+// Logger mínimo, por defecto imprime a consola
+// Se puede redirigir con set_logger(fn(&str)) antes de correr la simulación
 
 use core::sync::atomic::{AtomicPtr, Ordering};
 
@@ -11,7 +10,7 @@ fn default_log(s: &str) {
     println!("{}", s);
 }
 
-// Almacena un puntero a función; sin Mutex. Se asume set_logger() se llama antes de uso concurrente.
+// Almacena un puntero a función, se asume set_logger() se llama antes de uso concurrente
 static LOGGER_PTR: AtomicPtr<()> = AtomicPtr::new(default_log as *mut ());
 
 #[inline]

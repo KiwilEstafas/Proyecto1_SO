@@ -1,7 +1,7 @@
 // planta nuclear y logistica de suministros
 use crate::Coord;
 use std::collections::HashMap;
-use crate::tc_log; // <--- NUEVO
+use crate::tc_log; 
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum SupplyKind { Radioactive, Water }

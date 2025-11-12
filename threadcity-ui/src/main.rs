@@ -1,5 +1,3 @@
-// In: src/main.rs
-
 mod ui;
 mod ui_logger;
 
