@@ -1,6 +1,3 @@
-// threadcity-ui/src/ui_logger.rs
-// Módulo para redirigir println! hacia la terminal del UI
-
 use gtk::TextBuffer;
 use gtk::prelude::*; // <-- IMPORTANTE: habilita TextBufferExt (insert, end_iter)
 use std::cell::RefCell;
