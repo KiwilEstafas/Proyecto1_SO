@@ -1,6 +1,9 @@
 use gtk::cairo::Context;
 use pangocairo::functions::{create_layout, show_layout};
 use rand::Rng;
+use std::cell::RefCell;
+use std::collections::HashMap;
+use std::rc::Rc;
 
 // --- Constantes de la Cuadrícula y Dibujo (ahora públicas) ---
 pub const GRID_ROWS: u32 = 5;
@@ -16,6 +19,52 @@ pub const COLOR_BRIDGE_SURFACE: (f64, f64, f64) = (0.4, 0.4, 0.4);
 pub const COLOR_PLANT: (f64, f64, f64) = (0.7, 0.7, 0.7);
 pub const COLOR_BUILDING_MAIN: (f64, f64, f64) = (0.8, 0.78, 0.75);
 pub const COLOR_BUILDING_SHADOW: (f64, f64, f64) = (0.6, 0.58, 0.55);
+
+// colores para entidades
+const COLOR_CAR: (f64, f64, f64) = (0.9, 0.2, 0.2);
+const COLOR_AMB: (f64, f64, f64) = (1.0, 1.0, 1.0);
+const COLOR_TRK: (f64, f64, f64) = (0.9, 0.6, 0.1);
+const COLOR_BOT: (f64, f64, f64) = (0.2, 0.6, 0.9);
+
+// --- estado de escena para animar entidades ---
+
+#[derive(Clone, Copy)]
+pub enum EntityKind {
+    Car,
+    Ambulance,
+    Boat,
+    Truck,
+}
+
+#[derive(Clone, Copy)]
+pub struct EntityVis {
+    pub kind: EntityKind,
+    pub pos: (u32, u32),
+}
+
+#[derive(Default)]
+pub struct SceneState {
+    // id -> entidad visible
+    pub entities: HashMap<u32, EntityVis>,
+}
+
+impl SceneState {
+    pub fn set_entity(&mut self, id: u32, kind: EntityKind, pos: (u32, u32)) {
+        self.entities.insert(id, EntityVis { kind, pos });
+    }
+
+    pub fn move_entity(&mut self, id: u32, to: (u32, u32)) {
+        if let Some(e) = self.entities.get_mut(&id) {
+            e.pos = to;
+        }
+    }
+
+    pub fn remove_entity(&mut self, id: u32) {
+        self.entities.remove(&id);
+    }
+}
+
+pub type SharedScene = Rc<RefCell<SceneState>>;
 
 // --- Funciones de Dibujo (ahora públicas) ---
 
@@ -158,6 +207,25 @@ pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
     }
 }
 
+// dibujo de entidades segun escena
+
+pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) {
+    let block_w = width as f64 / GRID_COLS as f64;
+    let block_h = height as f64 / GRID_ROWS as f64;
+    for (_id, ev) in scene.entities.iter() {
+        let (x, y) = ev.pos;
+        let cx = (y as f64 + 0.5) * block_w;
+        let cy = (x as f64 + 0.5) * block_h;
+
+        match ev.kind {
+            EntityKind::Car => draw_entity_rect(cr, cx, cy, COLOR_CAR),
+            EntityKind::Ambulance => draw_entity_cross(cr, cx, cy, COLOR_AMB),
+            EntityKind::Truck => draw_entity_rect(cr, cx, cy, COLOR_TRK),
+            EntityKind::Boat => draw_entity_ellipse(cr, cx, cy, COLOR_BOT),
+        }
+    }
+}
+
 // --- Helpers de Dibujo (privados al módulo) ---
 
 fn draw_single_plant(cr: &Context, x: f64, y: f64) {
@@ -199,4 +267,35 @@ fn draw_text(cr: &Context, x: f64, y: f64, text: &str) {
     cr.move_to(x, y);
     cr.set_source_rgb(0.1, 0.1, 0.1);
     show_layout(cr, &layout);
+}
+
+// helpers para entidades
+
+fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    let w = 12.0;
+    let h = 8.0;
+    cr.set_source_rgb(color.0, color.1, color.2);
+    cr.rectangle(x - w / 2.0, y - h / 2.0, w, h);
+    cr.fill().unwrap();
+}
+
+fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    cr.set_source_rgb(color.0, color.1, color.2);
+    cr.save().unwrap();
+    cr.translate(x, y);
+    cr.scale(8.0, 5.0);
+    cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
+    cr.fill().unwrap();
+    cr.restore().unwrap();
+}
+
+fn draw_entity_cross(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    cr.set_source_rgb(0.2, 0.2, 0.2);
+    cr.rectangle(x - 7.0, y - 5.0, 14.0, 10.0);
+    cr.fill().unwrap();
+    cr.set_source_rgb(color.0, color.1, color.2);
+    cr.rectangle(x - 2.0, y - 5.0, 4.0, 10.0);
+    cr.fill().unwrap();
+    cr.rectangle(x - 7.0, y - 2.0, 14.0, 4.0);
+    cr.fill().unwrap();
 }

@@ -5,6 +5,8 @@ use gtk::prelude::*;
 use gtk::Application;
 
 fn main() {
+    mypthreads::mypthreads_api::runtime_init();
+
     let app = Application::builder()
         .application_id("com.threadcity.ui")
         .build();
