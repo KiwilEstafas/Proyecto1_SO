@@ -26,7 +26,7 @@ pub const COLOR_BUILDING_SHADOW: (f64, f64, f64) = (0.6, 0.58, 0.55);
 const COLOR_CAR: (f64, f64, f64) = (0.9, 0.2, 0.2);
 const COLOR_AMB: (f64, f64, f64) = (1.0, 1.0, 1.0);
 const COLOR_TRK: (f64, f64, f64) = (0.9, 0.6, 0.1);
-const COLOR_BOT: (f64, f64, f64) = (0.2, 0.6, 0.9);
+const COLOR_BOT: (f64, f64, f64) = (1.0, 0.95, 0.1);
 
 // --- estado de escena para animar entidades ---
 
@@ -359,12 +359,19 @@ fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
 }
 
 fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    cr.set_source_rgb(color.0, color.1, color.2);
     cr.save().unwrap();
     cr.translate(x, y);
-    cr.scale(8.0, 5.0);
+
+    cr.set_source_rgb(color.0, color.1, color.2);
+    cr.scale(16.0, 10.0); // antes 8.0, 5.0
     cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
     cr.fill().unwrap();
+
+    cr.set_source_rgb(0.0, 0.0, 0.0);
+    cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
+    cr.set_line_width(0.15);
+    cr.stroke().unwrap();
+
     cr.restore().unwrap();
 }
 

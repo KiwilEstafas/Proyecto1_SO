@@ -24,9 +24,9 @@ fn get_next_agent_id() -> u32 {
 
 // La función `main` original ahora es `run_simulation` y es pública
 pub fn run_simulation() {
-    println!("\n╔════════════════════════════════════════════════════════════╗");
-    println!("║           ThreadCity - Simulación                           ║");
-    println!("╚════════════════════════════════════════════════════════════╝\n");
+    tc_log!("\n╔════════════════════════════════════════════════════════════╗");
+    tc_log!("║           ThreadCity - Simulación                           ║");
+    tc_log!("╚════════════════════════════════════════════════════════════╝\n");
 
     // --- SETUP ---
     // runtime_init() se movió a main.rs
@@ -39,7 +39,7 @@ pub fn run_simulation() {
     let total_trucks = std::sync::Arc::new(AtomicU32::new(0));
     let total_boats = std::sync::Arc::new(AtomicU32::new(0));
 
-    println!("Iniciando simulación...\n");
+    tc_log!("Iniciando simulación...\n");
 
     // --- CREACIÓN INICIAL DE AGENTES ---
     for i in 0..5 {
@@ -58,7 +58,7 @@ pub fn run_simulation() {
             std::sync::Arc::clone(&total_ambulances),
         );
     }
-    println!("Creando camiones de carga aleatorios...");
+    tc_log!("Creando camiones de carga aleatorios...");
     for i in 0..4 {
         spawn_cargo_truck(
             200 + i,
@@ -74,14 +74,14 @@ pub fn run_simulation() {
         std::sync::Arc::clone(&total_boats),
     );
 
-    println!("Agentes iniciales creados.");
-    println!();
+    tc_log!("Agentes iniciales creados.");
+    tc_log!();
 
     // --- PARÁMETROS DE SIMULACIÓN ---
     const SIMULATION_STEPS: u32 = 100;
     const TIME_PER_STEP_MS: u64 = 500;
     const SCHEDULER_CYCLES_PER_STEP: usize = 20;
-    println!(
+    tc_log!(
         "Iniciando simulación... Pasos: {}, Tiempo/Paso: {}ms\n",
         SIMULATION_STEPS, TIME_PER_STEP_MS
     );
@@ -98,7 +98,7 @@ pub fn run_simulation() {
 
             city_lock.update(TIME_PER_STEP_MS);
             city_lock.check_plant_deadlines();
-            println!(
+            tc_log!(
                 "\n--- [Paso {} | Tiempo: {}ms] ---",
                 step,
                 city_lock.current_time()
@@ -178,26 +178,26 @@ pub fn run_simulation() {
         thread::sleep(Duration::from_millis(50));
     }
 
-    println!("\n╔════════════════════════════════════════════════════════════╗");
-    println!("║              Simulación Finalizada                        ║");
-    println!("╠════════════════════════════════════════════════════════════╣");
-    println!(
+    tc_log!("\n╔════════════════════════════════════════════════════════════╗");
+    tc_log!("║              Simulación Finalizada                        ║");
+    tc_log!("╠════════════════════════════════════════════════════════════╣");
+    tc_log!(
         "║ Carros Creados: {:>43} ║",
         total_cars.load(Ordering::Relaxed)
     );
-    println!(
+    tc_log!(
         "║ Ambulancias Creadas: {:>39} ║",
         total_ambulances.load(Ordering::Relaxed)
     );
-    println!(
+    tc_log!(
         "║ Camiones Creados: {:>42} ║",
         total_trucks.load(Ordering::Relaxed)
     );
-    println!(
+    tc_log!(
         "║ Barcos Creados: {:>45} ║",
         total_boats.load(Ordering::Relaxed)
     );
-    println!("╚════════════════════════════════════════════════════════════╝\n");
+    tc_log!("╚════════════════════════════════════════════════════════════╝\n");
 }
 
 // --- FUNCIONES SPAWN ---
@@ -458,7 +458,7 @@ fn vehicle_logic(
     match *state {
         AgentState::Traveling => {
             if pos.x == dest.x && pos.y == dest.y {
-                println!("[{}] ✅ Llegó a destino {:?}", id, dest);
+                tc_log!("[{}] ✅ Llegó a destino {:?}", id, dest);
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
@@ -469,7 +469,7 @@ fn vehicle_logic(
                 || (pos.y == layout.river_column + 1 && dest.y < layout.river_column);
 
             if needs_bridge && at_bridge_entrance {
-                println!("[{}] 🚦 En entrada de puente", id);
+                tc_log!("[{}] 🚦 En entrada de puente", id);
                 *state = AgentState::WaitingForBridge;
             } else {
                 move_towards(pos, dest, layout);
@@ -496,12 +496,12 @@ fn vehicle_logic(
             // En la lógica original, la ambulancia no usaba `try_cross` con prioridad,
             // simplemente se le daba paso. Se mantiene esa lógica.
             if agent_type == AgentType::Ambulance {
-                println!("[{}] 🚑 AMBULANCIA pasando directamente", id);
+                tc_log!("[{}] 🚑 AMBULANCIA pasando directamente", id);
                 can_cross = true;
             } else {
                 let final_priority = current_tickets as u8;
                 if bridge.try_cross(tid, final_priority, direction) {
-                    println!("[{}] Comenzó a cruzar puente {}", id, bridge_id);
+                    tc_log!("[{}] Comenzó a cruzar puente {}", id, bridge_id);
                     can_cross = true;
                 }
             }
@@ -524,7 +524,7 @@ fn vehicle_logic(
                     pos.y = layout.river_column - 1;
                 }
 
-                println!("[{}] Cruzó el puente, pos: {:?}", id, pos);
+                tc_log!("[{}] Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
 
                 let city_lock = match city.try_enter() {
@@ -577,7 +577,7 @@ fn cargo_truck_logic(
                 .expect("Suministro no requerido")
                 .clone();
             plant.commit_delivery(supply, current_time);
-            println!(
+            tc_log!(
                 "[Truck-{}] ✅ Entrega de {:?} a Planta en {:?}",
                 id, cargo, dest
             );
@@ -622,7 +622,7 @@ fn boat_logic(
     match *state {
         AgentState::Traveling => {
             if pos.x == dest.x && pos.y == dest.y {
-                println!("[Boat-{}] ✅ Llegó a destino {:?}", id, dest);
+                tc_log!("[Boat-{}] ✅ Llegó a destino {:?}", id, dest);
                 *state = AgentState::Arrived;
                 return ThreadSignal::Exit;
             }
@@ -643,7 +643,7 @@ fn boat_logic(
             let can_cross = bridge.boat_request_pass();
 
             if can_cross {
-                println!("[Boat-{}] ⛵ Puente levadizo levantado, pasando", id);
+                tc_log!("[Boat-{}] ⛵ Puente levadizo levantado, pasando", id);
                 *state = AgentState::CrossingBridge;
                 *crossing_steps = 0;
             }
@@ -656,7 +656,7 @@ fn boat_logic(
             *crossing_steps += 1;
             if *crossing_steps >= 5 {
                 pos.x += 1;
-                println!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
+                tc_log!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
 
                 let city_lock = match city.try_enter() {
