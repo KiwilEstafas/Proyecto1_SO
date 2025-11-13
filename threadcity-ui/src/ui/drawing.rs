@@ -82,12 +82,19 @@ pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
         let y = i as f64 * block_h - road_w / 2.0;
         cr.rectangle(0.0, y, block_w * RIVER_COL as f64, road_w);
         cr.fill().unwrap();
-        cr.rectangle(block_w * (RIVER_COL + 1) as f64, y, block_w * (GRID_COLS - RIVER_COL - 1) as f64, road_w);
+        cr.rectangle(
+            block_w * (RIVER_COL + 1) as f64,
+            y,
+            block_w * (GRID_COLS - RIVER_COL - 1) as f64,
+            road_w,
+        );
         cr.fill().unwrap();
     }
 
     for i in 1..GRID_COLS {
-        if i == RIVER_COL || i == RIVER_COL + 1 { continue; }
+        if i == RIVER_COL || i == RIVER_COL + 1 {
+            continue;
+        }
         let x = i as f64 * block_w - road_w / 2.0;
         cr.rectangle(x, 0.0, road_w, height as f64);
         cr.fill().unwrap();
@@ -111,10 +118,17 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
     for i in 0..15 {
         let y_start = i as f64 * (height as f64 / 10.0);
         cr.move_to(river_x, y_start);
-        cr.curve_to(river_x + block_w / 2.0, y_start + 10.0, river_x + block_w / 2.0, y_start - 10.0, river_x + block_w, y_start);
+        cr.curve_to(
+            river_x + block_w / 2.0,
+            y_start + 10.0,
+            river_x + block_w / 2.0,
+            y_start - 10.0,
+            river_x + block_w,
+            y_start,
+        );
         cr.stroke().unwrap();
     }
-    
+
     cr.set_source_rgba(0.9, 0.95, 1.0, 0.2);
     for _ in 0..150 {
         let rand_x = rng.gen_range(river_x..river_x + block_w);
@@ -134,22 +148,37 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
 pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
-    
-    let bridge_road_indices = [1, 2, 4];
+
+    // IMPORTANTE: filas de puentes alineadas con CityLayout (1, 2, 3)
+    let bridge_road_indices = [1, 2, 3];
 
     for (i, road_num) in bridge_road_indices.iter().enumerate() {
         let y_center = *road_num as f64 * block_h;
         let x_start = block_w * RIVER_COL as f64;
-        
+
         let bridge_height = 25.0;
         let surface_height = 15.0;
 
         cr.set_source_rgb(COLOR_BRIDGE_BASE.0, COLOR_BRIDGE_BASE.1, COLOR_BRIDGE_BASE.2);
-        cr.rectangle(x_start, y_center - bridge_height / 2.0, block_w, bridge_height);
+        cr.rectangle(
+            x_start,
+            y_center - bridge_height / 2.0,
+            block_w,
+            bridge_height,
+        );
         cr.fill().unwrap();
 
-        cr.set_source_rgb(COLOR_BRIDGE_SURFACE.0, COLOR_BRIDGE_SURFACE.1, COLOR_BRIDGE_SURFACE.2);
-        cr.rectangle(x_start, y_center - surface_height / 2.0, block_w, surface_height);
+        cr.set_source_rgb(
+            COLOR_BRIDGE_SURFACE.0,
+            COLOR_BRIDGE_SURFACE.1,
+            COLOR_BRIDGE_SURFACE.2,
+        );
+        cr.rectangle(
+            x_start,
+            y_center - surface_height / 2.0,
+            block_w,
+            surface_height,
+        );
         cr.fill().unwrap();
 
         cr.set_source_rgb(1.0, 0.8, 0.2);
@@ -171,11 +200,17 @@ pub fn draw_plants(cr: &Context, width: i32, height: i32) {
     let plant1_pos_grid = (1, 0);
     let plant2_pos_grid = (2, 4);
 
-    let (px1, py1) = ((plant1_pos_grid.1 as f64 + 0.5) * block_w, (plant1_pos_grid.0 as f64 + 0.5) * block_h);
+    let (px1, py1) = (
+        (plant1_pos_grid.1 as f64 + 0.5) * block_w,
+        (plant1_pos_grid.0 as f64 + 0.5) * block_h,
+    );
     draw_single_plant(cr, px1, py1);
     draw_text(cr, px1 - 25.0, py1 + 35.0, "Planta 1");
 
-    let (px2, py2) = ((plant2_pos_grid.1 as f64 + 0.5) * block_w, (plant2_pos_grid.0 as f64 + 0.5) * block_h);
+    let (px2, py2) = (
+        (plant2_pos_grid.1 as f64 + 0.5) * block_w,
+        (plant2_pos_grid.0 as f64 + 0.5) * block_h,
+    );
     draw_single_plant(cr, px2, py2);
     draw_text(cr, px2 - 25.0, py2 + 35.0, "Planta 2");
 }
@@ -183,7 +218,7 @@ pub fn draw_plants(cr: &Context, width: i32, height: i32) {
 pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
-    
+
     let plant1_pos = (1, 0);
     let plant2_pos = (2, 4);
 
@@ -193,29 +228,44 @@ pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
             if c == RIVER_COL || current_pos == plant1_pos || current_pos == plant2_pos {
                 continue;
             }
-            
+
             let cx = (c as f64 + 0.5) * block_w;
             let cy = (r as f64 + 0.5) * block_h;
-            
+
             if (r == 2 && c == 1) || (r == 2 && c == 3) {
-                 draw_single_building(cr, cx - 15.0, cy);
-                 draw_single_building(cr, cx + 15.0, cy);
+                draw_single_building(cr, cx - 15.0, cy);
+                draw_single_building(cr, cx + 15.0, cy);
             } else {
-                 draw_single_building(cr, cx, cy);
+                draw_single_building(cr, cx, cy);
             }
         }
     }
 }
 
 // dibujo de entidades segun escena
-
 pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
+    let road_w = 15.0;
+
     for (_id, ev) in scene.entities.iter() {
-        let (x, y) = ev.pos;
-        let cx = (y as f64 + 0.5) * block_w;
-        let cy = (x as f64 + 0.5) * block_h;
+        let (row, col) = ev.pos;
+
+        // Proyectar las coordenadas de la simulación sobre las CALLES:
+        // - En Y: usamos la carretera horizontal que está debajo de la fila `row`.
+        let cy = (row as f64 + 1.0) * block_h - road_w / 2.0;
+
+        // - En X: elegimos la carretera vertical más cercana:
+        //   * Lado oeste: carretera a la derecha de la cuadra
+        //   * Lado este: carretera a la izquierda de la cuadra
+        let cx = if col < RIVER_COL {
+            // carretera entre esta cuadra y la siguiente (derecha)
+            (col as f64 + 1.0) * block_w - road_w / 2.0
+        } else {
+            // col nunca debería ser exactamente RIVER_COL (la simulación evita el río),
+            // pero por seguridad lo tratamos igual que "este".
+            (col as f64) * block_w + road_w / 2.0
+        };
 
         match ev.kind {
             EntityKind::Car => draw_entity_rect(cr, cx, cy, COLOR_CAR),
@@ -233,11 +283,25 @@ fn draw_single_plant(cr: &Context, x: f64, y: f64) {
     let base_width = 30.0;
     let top_width = 22.0;
     let plant_height = 50.0;
-    
+
     cr.move_to(x - base_width / 2.0, y + plant_height / 2.0);
-    cr.curve_to(x - 15.0, y, x - 15.0, y, x - top_width / 2.0, y - plant_height / 2.0);
+    cr.curve_to(
+        x - 15.0,
+        y,
+        x - 15.0,
+        y,
+        x - top_width / 2.0,
+        y - plant_height / 2.0,
+    );
     cr.line_to(x + top_width / 2.0, y - plant_height / 2.0);
-    cr.curve_to(x + 15.0, y, x + 15.0, y, x + base_width / 2.0, y + plant_height / 2.0);
+    cr.curve_to(
+        x + 15.0,
+        y,
+        x + 15.0,
+        y,
+        x + base_width / 2.0,
+        y + plant_height / 2.0,
+    );
     cr.close_path();
     cr.fill().unwrap();
 }
@@ -247,11 +311,24 @@ fn draw_single_building(cr: &Context, x: f64, y: f64) {
     let shadow_offset = 3.0;
     let half_size = building_size / 2.0;
 
-    cr.set_source_rgb(COLOR_BUILDING_SHADOW.0, COLOR_BUILDING_SHADOW.1, COLOR_BUILDING_SHADOW.2);
-    cr.rectangle(x - half_size + shadow_offset, y - half_size + shadow_offset, building_size, building_size);
+    cr.set_source_rgb(
+        COLOR_BUILDING_SHADOW.0,
+        COLOR_BUILDING_SHADOW.1,
+        COLOR_BUILDING_SHADOW.2,
+    );
+    cr.rectangle(
+        x - half_size + shadow_offset,
+        y - half_size + shadow_offset,
+        building_size,
+        building_size,
+    );
     cr.fill().unwrap();
 
-    cr.set_source_rgb(COLOR_BUILDING_MAIN.0, COLOR_BUILDING_MAIN.1, COLOR_BUILDING_MAIN.2);
+    cr.set_source_rgb(
+        COLOR_BUILDING_MAIN.0,
+        COLOR_BUILDING_MAIN.1,
+        COLOR_BUILDING_MAIN.2,
+    );
     cr.rectangle(x - half_size, y - half_size, building_size, building_size);
     cr.fill().unwrap();
 }
