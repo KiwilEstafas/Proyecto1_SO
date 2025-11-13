@@ -9,12 +9,12 @@ use rand::{prelude::*, Rng}; // Unificado para `prelude` y `Rng`
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
 use std::time::Duration;
-// Los `use` ahora usan `crate::` porque estamos dentro de la misma librería.
 use crate::{
     create_city, create_shared_city, nearest_bridge, AgentInfo, AgentState, AgentType, Ambulance,
-    Boat, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind,
-    TrafficDirection, Vehicle,
+    Boat, CargoTruck, CityLayout, Coord, PlantStatus, SharedCity, SupplyKind, TrafficDirection,
+    Vehicle,
 };
+use crate::tc_log;
 use rand::rng;
 
 static NEXT_AGENT_ID: AtomicU32 = AtomicU32::new(301);
@@ -22,7 +22,7 @@ fn get_next_agent_id() -> u32 {
     NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-// La función `main` original ahora es `run_simulation` y es pública.
+// La función `main` original ahora es `run_simulation` y es pública
 pub fn run_simulation() {
     println!("\n╔════════════════════════════════════════════════════════════╗");
     println!("║           ThreadCity - Simulación                           ║");
@@ -212,7 +212,7 @@ fn spawn_car(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::sync
     let mut state = AgentState::Traveling;
     let mut crossing_steps = 0u32;
 
-    println!("🚗 Carro-{} creado: {:?} -> {:?}", id, origin, dest);
+    tc_log!("🚗 Carro-{} creado: {:?} -> {:?}", id, origin, dest);
 
     let tid = my_thread_create(
         &format!("Car-{}", id),
@@ -264,7 +264,7 @@ fn spawn_ambulance(
     let mut state = AgentState::Traveling;
     let mut crossing_steps = 0u32;
 
-    println!("🚑 Ambulancia-{} creada: {:?} -> {:?}", id, origin, dest);
+    tc_log!("🚑 Ambulancia-{} creada: {:?} -> {:?}", id, origin, dest);
 
     let tid = my_thread_create(
         &format!("Ambulance-{}", id),
@@ -346,9 +346,13 @@ fn spawn_cargo_truck(
     let mut crossing_steps = 0u32;
     let cargo_for_thread = cargo;
 
-    println!(
+    tc_log!(
         "🚚 CargoTruck-{} ({:?}): {:?} -> {:?}, deadline: {}ms",
-        id, cargo, origin, destination, deadline
+        id,
+        cargo,
+        origin,
+        destination,
+        deadline
     );
 
     let tid = my_thread_create(
@@ -402,7 +406,7 @@ fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::syn
     let mut state = AgentState::Traveling;
     let mut crossing_steps = 0u32;
 
-    println!("⛵ Barco-{} creado: {:?} -> {:?}", id, origin, dest);
+    tc_log!("⛵ Barco-{} creado: {:?} -> {:?}", id, origin, dest);
 
     let tid = my_thread_create(
         &format!("Boat-{}", id),
