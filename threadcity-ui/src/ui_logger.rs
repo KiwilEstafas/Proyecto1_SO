@@ -160,20 +160,91 @@ fn extract_coord_from(s: &str) -> Option<(u32, u32)> {
 
 // genera pasos de movimiento manhattan simples
 fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u32)) {
-    // movimiento en y evitando dibujar justo en la columna del rio como paso intermedio
-    while cur.1 != dest.1 {
-        if cur.1 < dest.1 { 
-            if cur.1 + 1 == RIVER_COL { cur.1 += 2; } else { cur.1 += 1; }
-        } else { 
-            if cur.1 - 1 == RIVER_COL { 
-                if cur.1 > 0 { cur.1 -= 2; } 
-            } else { cur.1 -= 1; }
+    let (dest_row, dest_col) = dest;
+
+    // ¿están en lados distintos del río?
+    let needs_cross = (cur.1 < RIVER_COL && dest_col > RIVER_COL)
+        || (cur.1 > RIVER_COL && dest_col < RIVER_COL);
+
+    if needs_cross {
+        // filas de puentes reales según CityLayout::default()
+        let bridge_rows = [1u32, 2, 3];
+
+        // elegimos la fila de puente más cercana a la fila actual
+        let mut cross_row = bridge_rows[0];
+        let mut best = cur.0.abs_diff(bridge_rows[0]);
+        for &br in &bridge_rows[1..] {
+            let d = cur.0.abs_diff(br);
+            if d < best {
+                best = d;
+                cross_row = br;
+            }
         }
-        q.push(UiEvent::Move { id, to: cur });
-    }
-    while cur.0 != dest.0 {
-        if cur.0 < dest.0 { cur.0 += 1; } else { cur.0 -= 1; }
-        q.push(UiEvent::Move { id, to: cur });
+
+        // 1) subir/bajar hasta la fila del puente, sin cruzar el río aún
+        while cur.0 != cross_row {
+            if cur.0 < cross_row {
+                cur.0 += 1;
+            } else {
+                cur.0 -= 1;
+            }
+            q.push(UiEvent::Move { id, to: cur });
+        }
+
+        // 2) cruzar el río en esa fila, saltando la columna del río
+        while cur.1 != dest_col {
+            if cur.1 < dest_col {
+                if cur.1 + 1 == RIVER_COL {
+                    // saltamos directamente al otro lado
+                    cur.1 += 2;
+                } else {
+                    cur.1 += 1;
+                }
+            } else {
+                if cur.1 - 1 == RIVER_COL {
+                    if cur.1 > 0 {
+                        cur.1 -= 2;
+                    } else {
+                        break;
+                    }
+                } else {
+                    cur.1 -= 1;
+                }
+            }
+            q.push(UiEvent::Move { id, to: cur });
+        }
+
+        // 3) una vez del otro lado, ajustar la fila hasta el destino
+        while cur.0 != dest_row {
+            if cur.0 < dest_row {
+                cur.0 += 1;
+            } else {
+                cur.0 -= 1;
+            }
+            q.push(UiEvent::Move { id, to: cur });
+        }
+    } else {
+        // caso simple: no hay cruce de río, comportamiento anterior
+        while cur.1 != dest_col {
+            if cur.1 < dest_col {
+                cur.1 += 1;
+            } else {
+                if cur.1 > 0 {
+                    cur.1 -= 1;
+                } else {
+                    break;
+                }
+            }
+            q.push(UiEvent::Move { id, to: cur });
+        }
+        while cur.0 != dest_row {
+            if cur.0 < dest_row {
+                cur.0 += 1;
+            } else {
+                cur.0 -= 1;
+            }
+            q.push(UiEvent::Move { id, to: cur });
+        }
     }
     q.push(UiEvent::Remove { id });
 }
