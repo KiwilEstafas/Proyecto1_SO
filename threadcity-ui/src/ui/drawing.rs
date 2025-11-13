@@ -5,7 +5,7 @@ use std::cell::RefCell;
 use std::collections::HashMap;
 use std::rc::Rc;
 
-// --- Constantes de la Cuadrícula y Dibujo (ahora públicas) ---
+// --- Constantes de la Cuadricula y Dibujo (ahora publicas) ---
 pub const GRID_ROWS: u32 = 5;
 pub const GRID_COLS: u32 = 5;
 pub const RIVER_COL: u32 = 2;
@@ -66,7 +66,7 @@ impl SceneState {
 
 pub type SharedScene = Rc<RefCell<SceneState>>;
 
-// --- Funciones de Dibujo (ahora públicas) ---
+// --- Funciones de Dibujo (ahora publicas) ---
 
 pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
     cr.set_source_rgb(COLOR_GRASS.0, COLOR_GRASS.1, COLOR_GRASS.2);
@@ -251,32 +251,47 @@ pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) 
     for (_id, ev) in scene.entities.iter() {
         let (row, col) = ev.pos;
 
-        // Proyectar las coordenadas de la simulación sobre las CALLES:
-        // - En Y: usamos la carretera horizontal que está debajo de la fila `row`.
-        let cy = (row as f64 + 1.0) * block_h - road_w / 2.0;
-
-        // - En X: elegimos la carretera vertical más cercana:
-        //   * Lado oeste: carretera a la derecha de la cuadra
-        //   * Lado este: carretera a la izquierda de la cuadra
-        let cx = if col < RIVER_COL {
-            // carretera entre esta cuadra y la siguiente (derecha)
-            (col as f64 + 1.0) * block_w - road_w / 2.0
-        } else {
-            // col nunca debería ser exactamente RIVER_COL (la simulación evita el río),
-            // pero por seguridad lo tratamos igual que "este".
-            (col as f64) * block_w + road_w / 2.0
-        };
-
         match ev.kind {
-            EntityKind::Car => draw_entity_rect(cr, cx, cy, COLOR_CAR),
-            EntityKind::Ambulance => draw_entity_cross(cr, cx, cy, COLOR_AMB),
-            EntityKind::Truck => draw_entity_rect(cr, cx, cy, COLOR_TRK),
-            EntityKind::Boat => draw_entity_ellipse(cr, cx, cy, COLOR_BOT),
+            // Los barcos se dibujan en el centro del rio
+            EntityKind::Boat => {
+                let cx = (RIVER_COL as f64 + 0.5) * block_w;
+                let cy = (row as f64 + 0.5) * block_h;
+                draw_entity_ellipse(cr, cx, cy, COLOR_BOT);
+            }
+
+            // Carro / ambulancia / camion -> sobre las calles
+            EntityKind::Car | EntityKind::Ambulance | EntityKind::Truck => {
+                // --- EJE Y: elegir una de las 4 calles horizontales reales (1..GRID_ROWS-1) ---
+                // row = 0 -> calle 1
+                // row = 1 -> calle 2
+                // row = 2 -> calle 3
+                // row = 3 -> calle 4
+                // row = 4 -> tambien calle 4 (no inventamos calle 5)
+                let road_row_idx = std::cmp::min(row + 1, GRID_ROWS - 1) as f64;
+                let cy = road_row_idx * block_h - road_w / 2.0;
+
+                // --- EJE X: solo hay 2 calles verticales:
+                // indice 1 (entre col 0 y 1) -> lado oeste
+                // indice 4 (entre col 3 y 4) -> lado este
+                let road_col_idx = if col < RIVER_COL {
+                    1  // oeste
+                } else {
+                    GRID_COLS - 1 // este (para cols 3 y 4)
+                } as f64;
+                let cx = road_col_idx * block_w - road_w / 2.0;
+
+                match ev.kind {
+                    EntityKind::Car => draw_entity_rect(cr, cx, cy, COLOR_CAR),
+                    EntityKind::Ambulance => draw_entity_cross(cr, cx, cy, COLOR_AMB),
+                    EntityKind::Truck => draw_entity_rect(cr, cx, cy, COLOR_TRK),
+                    EntityKind::Boat => unreachable!(),
+                }
+            }
         }
     }
 }
 
-// --- Helpers de Dibujo (privados al módulo) ---
+// --- Helpers de Dibujo (privados al modulo) ---
 
 fn draw_single_plant(cr: &Context, x: f64, y: f64) {
     cr.set_source_rgb(COLOR_PLANT.0, COLOR_PLANT.1, COLOR_PLANT.2);
