@@ -10,6 +10,9 @@ pub const GRID_ROWS: u32 = 5;
 pub const GRID_COLS: u32 = 5;
 pub const RIVER_COL: u32 = 2;
 
+// filas (en coordenadas de grid) donde hay puentes, consistentes con CityLayout
+pub const BRIDGE_ROWS: [u32; 3] = [1, 2, 3];
+
 pub const COLOR_GRASS: (f64, f64, f64) = (0.4, 0.7, 0.3);
 pub const COLOR_ROAD: (f64, f64, f64) = (0.3, 0.3, 0.3);
 pub const COLOR_RIVER_TOP: (f64, f64, f64) = (0.3, 0.5, 0.8);
@@ -148,37 +151,22 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
 pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
-
-    // IMPORTANTE: filas de puentes alineadas con CityLayout (1, 2, 3)
-    let bridge_road_indices = [1, 2, 3];
+    
+    let bridge_road_indices = BRIDGE_ROWS;
 
     for (i, road_num) in bridge_road_indices.iter().enumerate() {
         let y_center = *road_num as f64 * block_h;
         let x_start = block_w * RIVER_COL as f64;
-
+        
         let bridge_height = 25.0;
         let surface_height = 15.0;
 
         cr.set_source_rgb(COLOR_BRIDGE_BASE.0, COLOR_BRIDGE_BASE.1, COLOR_BRIDGE_BASE.2);
-        cr.rectangle(
-            x_start,
-            y_center - bridge_height / 2.0,
-            block_w,
-            bridge_height,
-        );
+        cr.rectangle(x_start, y_center - bridge_height / 2.0, block_w, bridge_height);
         cr.fill().unwrap();
 
-        cr.set_source_rgb(
-            COLOR_BRIDGE_SURFACE.0,
-            COLOR_BRIDGE_SURFACE.1,
-            COLOR_BRIDGE_SURFACE.2,
-        );
-        cr.rectangle(
-            x_start,
-            y_center - surface_height / 2.0,
-            block_w,
-            surface_height,
-        );
+        cr.set_source_rgb(COLOR_BRIDGE_SURFACE.0, COLOR_BRIDGE_SURFACE.1, COLOR_BRIDGE_SURFACE.2);
+        cr.rectangle(x_start, y_center - surface_height / 2.0, block_w, surface_height);
         cr.fill().unwrap();
 
         cr.set_source_rgb(1.0, 0.8, 0.2);

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 use crate::ui::event_queue::{EventQueue, UiEvent, EntityKind};
-use crate::ui::drawing::RIVER_COL;
+use crate::ui::drawing::{RIVER_COL, BRIDGE_ROWS};
 
 // logger del ui que tambien traduce algunos logs a eventos para animacion
 
@@ -168,7 +168,7 @@ fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u3
 
     if needs_cross {
         // filas de puentes reales según CityLayout::default()
-        let bridge_rows = [1u32, 2, 3];
+        let bridge_rows = BRIDGE_ROWS;
 
         // elegimos la fila de puente más cercana a la fila actual
         let mut cross_row = bridge_rows[0];
