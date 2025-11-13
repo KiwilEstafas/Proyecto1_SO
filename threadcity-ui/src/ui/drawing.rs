@@ -10,8 +10,7 @@ pub const GRID_ROWS: u32 = 5;
 pub const GRID_COLS: u32 = 5;
 pub const RIVER_COL: u32 = 2;
 
-// filas (en coordenadas de grid) donde hay puentes, consistentes con CityLayout
-pub const BRIDGE_ROWS: [u32; 3] = [1, 2, 3];
+pub const BRIDGE_ROWS: [u32; 3] = [2, 3, 4];
 
 pub const COLOR_GRASS: (f64, f64, f64) = (0.4, 0.7, 0.3);
 pub const COLOR_ROAD: (f64, f64, f64) = (0.3, 0.3, 0.3);
