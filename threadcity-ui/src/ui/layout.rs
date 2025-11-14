@@ -10,7 +10,7 @@ use std::sync::mpsc;
 use std::thread;
 
 use super::drawing;
-use super::drawing::{SceneState, SharedScene};
+use super::drawing::{SceneState, SharedScene, PlantVisState};
 use crate::ui::event_queue::{EntityKind, EventQueue, UiEvent};
 use crate::ui_logger::UiLogger;
 
@@ -45,12 +45,13 @@ pub fn build_ui(app: &Application) {
     {
         let scene_for_draw = scene.clone();
         map.set_draw_func(move |_, cr, width, height| {
+            let scene_ref = scene_for_draw.borrow();
             drawing::draw_background_and_roads(cr, width, height);
             drawing::draw_river(cr, width, height);
             drawing::draw_bridges(cr, width, height);
-            drawing::draw_plants(cr, width, height);
+            drawing::draw_plants(cr, width, height, &scene_ref);
             drawing::draw_commerce_buildings(cr, width, height);
-            drawing::draw_entities(cr, width, height, &scene_for_draw.borrow());
+            drawing::draw_entities(cr, width, height, &scene_ref);
         });
     }
 
@@ -91,13 +92,13 @@ pub fn build_ui(app: &Application) {
         .child(&tree)
         .build();
 
-    // --- CAMBIO 1: CREAR EL LABEL PARA EL MENSAJE FINAL ---
+    // Label para mensaje final
     let end_message_label = gtk::Label::new(None);
-    end_message_label.set_visible(false); // Empezará oculto
+    end_message_label.set_visible(false);
 
     vbox.append(&hbox_top);
     vbox.append(&scroll_table);
-    vbox.append(&end_message_label); // Añadimos el label al final del layout
+    vbox.append(&end_message_label);
     window.set_child(Some(&vbox));
 
     let ui_logger = UiLogger::init(text_buffer.clone(), events.clone());
@@ -118,10 +119,8 @@ pub fn build_ui(app: &Application) {
         let events = events.clone();
         let scene = scene.clone();
         let map_area = map.clone();
-        // --- CAMBIO 2: CLONAR EL LABEL PARA USARLO EN EL CLOSURE ---
         let end_label_clone = end_message_label.clone();
 
-        // --- APLICAMOS EL CAMBIO DE VELOCIDAD AQUÍ ---
         glib::timeout_add_local(std::time::Duration::from_millis(350), move || {
             if let Some(ev) = events.borrow_mut().pop() {
                 match ev {
@@ -146,11 +145,22 @@ pub fn build_ui(app: &Application) {
                     UiEvent::Log(_) => {
                         // no hace nada visual
                     }
-                    // --- CAMBIO 3: AÑADIR EL CASO PARA EL NUEVO EVENTO ---
                     UiEvent::SimulationFinished => {
                         let markup = "<span size='xx-large' weight='bold' foreground='lime'>Simulación Finalizada</span>";
                         end_label_clone.set_markup(markup);
                         end_label_clone.set_visible(true);
+                    }
+                    UiEvent::PlantExploded { id } => {
+                        scene
+                            .borrow_mut()
+                            .set_plant_state(id, PlantVisState::Exploded);
+                        map_area.queue_draw();
+                    }
+                    UiEvent::PlantRecovered { id } => {
+                        scene
+                            .borrow_mut()
+                            .set_plant_state(id, PlantVisState::Normal);
+                        map_area.queue_draw();
                     }
                 }
             }

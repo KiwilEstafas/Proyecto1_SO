@@ -1,5 +1,3 @@
-// EN: ui/drawing.rs
-
 use gtk::cairo::Context;
 use pangocairo::functions::{create_layout, show_layout};
 use rand::Rng;
@@ -12,6 +10,7 @@ pub const GRID_ROWS: u32 = 5;
 pub const GRID_COLS: u32 = 5;
 pub const RIVER_COL: u32 = 2;
 
+// filas donde se dibujan los puentes
 pub const BRIDGE_ROWS: [u32; 3] = [2, 3, 4];
 
 pub const COLOR_GRASS: (f64, f64, f64) = (0.4, 0.7, 0.3);
@@ -29,10 +28,10 @@ const COLOR_CAR: (f64, f64, f64) = (0.9, 0.2, 0.2);
 const COLOR_AMB: (f64, f64, f64) = (1.0, 1.0, 1.0);
 const COLOR_TRK: (f64, f64, f64) = (0.9, 0.6, 0.1);
 
-// --- CAMBIO 1: Cambiar el color del barco de amarillo a azul brillante ---
-const COLOR_BOT: (f64, f64, f64) = (0.1, 0.7, 1.0); // Antes era amarillo
+// Barco azul brillante
+const COLOR_BOT: (f64, f64, f64) = (0.1, 0.7, 1.0);
 
-// --- estado de escena para animar entidades ---
+// --- estado de escena para animar entidades y plantas ---
 
 #[derive(Clone, Copy)]
 pub enum EntityKind {
@@ -48,10 +47,24 @@ pub struct EntityVis {
     pub pos: (u32, u32),
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum PlantVisState {
+    Normal,
+    Exploded,
+}
+
+impl Default for PlantVisState {
+    fn default() -> Self {
+        PlantVisState::Normal
+    }
+}
+
 #[derive(Default)]
 pub struct SceneState {
     // id -> entidad visible
     pub entities: HashMap<u32, EntityVis>,
+    // id_planta -> estado visual
+    pub plant_states: HashMap<u32, PlantVisState>,
 }
 
 impl SceneState {
@@ -68,14 +81,24 @@ impl SceneState {
     pub fn remove_entity(&mut self, id: u32) {
         self.entities.remove(&id);
     }
+
+    pub fn set_plant_state(&mut self, id: u32, state: PlantVisState) {
+        self.plant_states.insert(id, state);
+    }
+
+    pub fn get_plant_state(&self, id: u32) -> PlantVisState {
+        self.plant_states
+            .get(&id)
+            .copied()
+            .unwrap_or(PlantVisState::Normal)
+    }
 }
 
 pub type SharedScene = Rc<RefCell<SceneState>>;
 
-// --- Funciones de Dibujo (sin cambios en las de fondo) ---
+// --- Funciones de Dibujo ---
 
 pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
-    // ... (sin cambios aquí)
     cr.set_source_rgb(COLOR_GRASS.0, COLOR_GRASS.1, COLOR_GRASS.2);
     cr.paint().unwrap();
 
@@ -109,7 +132,6 @@ pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_river(cr: &Context, width: i32, height: i32) {
-    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let river_x = block_w * RIVER_COL as f64;
     let mut rng = rand::thread_rng();
@@ -154,7 +176,6 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
-    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
     
@@ -187,31 +208,41 @@ pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
     }
 }
 
-pub fn draw_plants(cr: &Context, width: i32, height: i32) {
-    // ... (sin cambios aquí)
+pub fn draw_plants(cr: &Context, width: i32, height: i32, scene: &SceneState) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
 
     let plant1_pos_grid = (1, 0);
     let plant2_pos_grid = (2, 4);
 
+    // Planta 1 (id = 1)
     let (px1, py1) = (
         (plant1_pos_grid.1 as f64 + 0.5) * block_w,
         (plant1_pos_grid.0 as f64 + 0.5) * block_h,
     );
-    draw_single_plant(cr, px1, py1);
+    let p1_state = scene.get_plant_state(1);
+    let p1_color = match p1_state {
+        PlantVisState::Normal => COLOR_PLANT,
+        PlantVisState::Exploded => (0.9, 0.1, 0.1), // rojo chillón
+    };
+    draw_single_plant(cr, px1, py1, p1_color);
     draw_text(cr, px1 - 25.0, py1 + 35.0, "Planta 1");
 
+    // Planta 2 (id = 2)
     let (px2, py2) = (
         (plant2_pos_grid.1 as f64 + 0.5) * block_w,
         (plant2_pos_grid.0 as f64 + 0.5) * block_h,
     );
-    draw_single_plant(cr, px2, py2);
+    let p2_state = scene.get_plant_state(2);
+    let p2_color = match p2_state {
+        PlantVisState::Normal => COLOR_PLANT,
+        PlantVisState::Exploded => (0.9, 0.1, 0.1),
+    };
+    draw_single_plant(cr, px2, py2, p2_color);
     draw_text(cr, px2 - 25.0, py2 + 35.0, "Planta 2");
 }
 
 pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
-    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
 
@@ -238,7 +269,8 @@ pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
     }
 }
 
-// --- CAMBIO 3: Actualizar `draw_entities` para usar la nueva función ---
+// dibujo de entidades segun escena
+
 pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
@@ -251,7 +283,6 @@ pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) 
             EntityKind::Boat => {
                 let cx = (RIVER_COL as f64 + 0.5) * block_w;
                 let cy = (row as f64 + 0.5) * block_h;
-                // Llamamos a nuestra nueva función en lugar de la de la elipse
                 draw_entity_triangle(cr, cx, cy, COLOR_BOT);
             }
             EntityKind::Car | EntityKind::Ambulance | EntityKind::Truck => {
@@ -274,9 +305,8 @@ pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) 
 
 // --- Helpers de Dibujo (privados al modulo) ---
 
-fn draw_single_plant(cr: &Context, x: f64, y: f64) {
-    // ... (sin cambios aquí)
-    cr.set_source_rgb(COLOR_PLANT.0, COLOR_PLANT.1, COLOR_PLANT.2);
+fn draw_single_plant(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    cr.set_source_rgb(color.0, color.1, color.2);
     let base_width = 30.0;
     let top_width = 22.0;
     let plant_height = 50.0;
@@ -304,7 +334,6 @@ fn draw_single_plant(cr: &Context, x: f64, y: f64) {
 }
 
 fn draw_single_building(cr: &Context, x: f64, y: f64) {
-    // ... (sin cambios aquí)
     let building_size = 25.0;
     let shadow_offset = 3.0;
     let half_size = building_size / 2.0;
@@ -332,7 +361,6 @@ fn draw_single_building(cr: &Context, x: f64, y: f64) {
 }
 
 fn draw_text(cr: &Context, x: f64, y: f64, text: &str) {
-    // ... (sin cambios aquí)
     let layout = create_layout(cr);
     let mut desc = pango::FontDescription::new();
     desc.set_family("Sans");
@@ -348,7 +376,6 @@ fn draw_text(cr: &Context, x: f64, y: f64, text: &str) {
 // helpers para entidades
 
 fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    // ... (sin cambios aquí)
     let w = 12.0;
     let h = 8.0;
     cr.set_source_rgb(color.0, color.1, color.2);
@@ -357,7 +384,6 @@ fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
 }
 
 fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    // ... (esta función ya no se usará para el barco, pero la dejamos por si acaso)
     cr.save().unwrap();
     cr.translate(x, y);
 
@@ -374,33 +400,25 @@ fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
     cr.restore().unwrap();
 }
 
-// --- CAMBIO 2: Añadir una nueva función para dibujar el triángulo del barco ---
 fn draw_entity_triangle(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    let size = 20.0; // El tamaño del triángulo, puedes ajustarlo
+    let size = 20.0;
     let half_size = size / 2.0;
 
     cr.set_source_rgb(color.0, color.1, color.2);
     
-    // El barco se mueve hacia arriba (disminuye la Y), así que el triángulo apunta hacia arriba.
-    // Vértice superior
     cr.move_to(x, y - half_size);
-    // Vértice inferior izquierdo
     cr.line_to(x - half_size, y + half_size);
-    // Vértice inferior derecho
     cr.line_to(x + half_size, y + half_size);
-    // Cierra la forma volviendo al vértice superior
     cr.close_path();
 
     cr.fill().unwrap();
 
-    // Añadimos un borde negro para que resalte más
     cr.set_source_rgb(0.0, 0.0, 0.0);
     cr.set_line_width(1.5);
     cr.stroke().unwrap();
 }
 
 fn draw_entity_cross(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    // ... (sin cambios aquí)
     cr.set_source_rgb(0.2, 0.2, 0.2);
     cr.rectangle(x - 7.0, y - 5.0, 14.0, 10.0);
     cr.fill().unwrap();

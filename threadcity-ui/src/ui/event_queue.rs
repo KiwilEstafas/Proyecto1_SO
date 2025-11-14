@@ -17,7 +17,10 @@ pub enum UiEvent {
     Move  { id: u32, to: (u32, u32) },
     Remove { id: u32 },
     Log(String),
-    SimulationFinished
+    SimulationFinished,
+    // NUEVOS EVENTOS PARA PLANTAS
+    PlantExploded { id: u32 },
+    PlantRecovered { id: u32 },
 }
 
 pub struct EventQueue {

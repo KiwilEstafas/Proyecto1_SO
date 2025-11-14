@@ -1,15 +1,28 @@
+// cola fifo de eventos para animacion sin mutex ni hilos
+// se usa solo en el hilo del ui
+
 use std::collections::VecDeque;
 
-// representa un evento del simulador que el ui puede animar
 #[derive(Clone, Debug)]
-pub enum UiEvent {
-    MoveEntity { id: usize, from: (i32, i32), to: (i32, i32) },
-    SpawnEntity { id: usize, position: (i32, i32) },
-    RemoveEntity { id: usize },
-    Log(String),
+pub enum EntityKind {
+    Car,
+    Ambulance,
+    Boat,
+    Truck,
 }
 
-// cola simple para almacenar los eventos generados
+#[derive(Clone, Debug)]
+pub enum UiEvent {
+    Spawn { id: u32, kind: EntityKind, pos: (u32, u32) },
+    Move  { id: u32, to: (u32, u32) },
+    Remove { id: u32 },
+    Log(String),
+    SimulationFinished,
+    // NUEVOS EVENTOS PARA PLANTAS
+    PlantExploded { id: u32 },
+    PlantRecovered { id: u32 },
+}
+
 pub struct EventQueue {
     queue: VecDeque<UiEvent>,
 }
@@ -19,18 +32,15 @@ impl EventQueue {
         Self { queue: VecDeque::new() }
     }
 
-    // agrega un evento al final de la cola
-    pub fn push(&mut self, event: UiEvent) {
-        self.queue.push_back(event)
+    pub fn push(&mut self, ev: UiEvent) {
+        self.queue.push_back(ev);
     }
 
-    // obtiene el siguiente evento si existe
     pub fn pop(&mut self) -> Option<UiEvent> {
         self.queue.pop_front()
     }
 
-    // devuelve true si aun hay eventos por procesar
-    pub fn has_events(&self) -> bool {
-        !self.queue.is_empty()
+    pub fn is_empty(&self) -> bool {
+        self.queue.is_empty()
     }
 }
