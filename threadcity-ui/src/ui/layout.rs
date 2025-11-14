@@ -1,18 +1,18 @@
 use gtk::prelude::*;
 use gtk::{
-    Application, ApplicationWindow, Orientation, TextView, TextBuffer, DrawingArea, ScrolledWindow,
-    Box as GtkBox, ListStore, TreeView, TreeViewColumn, CellRendererText,
+    Application, ApplicationWindow, Box as GtkBox, CellRendererText, DrawingArea, ListStore,
+    Orientation, ScrolledWindow, TextBuffer, TextView, TreeView, TreeViewColumn,
 };
 use once_cell::sync::OnceCell;
-use std::thread;
-use std::sync::mpsc;
-use std::rc::Rc;
 use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::mpsc;
+use std::thread;
 
 use super::drawing;
-use super::drawing::{SharedScene, SceneState};
+use super::drawing::{SceneState, SharedScene};
+use crate::ui::event_queue::{EntityKind, EventQueue, UiEvent};
 use crate::ui_logger::UiLogger;
-use crate::ui::event_queue::{EventQueue, UiEvent, EntityKind};
 
 // El logger global ahora vive aquí, encapsulado dentro del módulo de UI.
 static LOG_SENDER: OnceCell<mpsc::Sender<String>> = OnceCell::new();
@@ -36,11 +36,9 @@ pub fn build_ui(app: &Application) {
     let vbox = GtkBox::new(Orientation::Vertical, 5);
     let hbox_top = GtkBox::new(Orientation::Horizontal, 5);
 
-    // estado visual compartido solo en el hilo del ui
     let scene: SharedScene = Rc::new(RefCell::new(SceneState::default()));
     let events = Rc::new(RefCell::new(EventQueue::new()));
 
-    // Configurar el DrawingArea para usar nuestras funciones de dibujo
     let map = DrawingArea::new();
     map.set_content_width(600);
     map.set_content_height(600);
@@ -52,20 +50,32 @@ pub fn build_ui(app: &Application) {
             drawing::draw_bridges(cr, width, height);
             drawing::draw_plants(cr, width, height);
             drawing::draw_commerce_buildings(cr, width, height);
-            // dibuja entidades animadas
             drawing::draw_entities(cr, width, height, &scene_for_draw.borrow());
         });
     }
 
     let text_buffer = TextBuffer::new(None);
-    let text_view = TextView::builder().editable(false).cursor_visible(false).wrap_mode(gtk::WrapMode::Word).buffer(&text_buffer).build();
-    let scrolled_logs = ScrolledWindow::builder().vexpand(true).hexpand(true).child(&text_view).build();
+    let text_view = TextView::builder()
+        .editable(false)
+        .cursor_visible(false)
+        .wrap_mode(gtk::WrapMode::Word)
+        .buffer(&text_buffer)
+        .build();
+    let scrolled_logs = ScrolledWindow::builder()
+        .vexpand(true)
+        .hexpand(true)
+        .child(&text_view)
+        .build();
 
     hbox_top.append(&map);
     hbox_top.append(&scrolled_logs);
 
     let columns = ["Entidad", "Estado", "Detalle"];
-    let store = ListStore::new(&[String::static_type(), String::static_type(), String::static_type()]);
+    let store = ListStore::new(&[
+        String::static_type(),
+        String::static_type(),
+        String::static_type(),
+    ]);
     let tree = TreeView::with_model(&store);
     for (i, title) in columns.iter().enumerate() {
         let renderer = CellRendererText::new();
@@ -76,18 +86,24 @@ pub fn build_ui(app: &Application) {
         col.add_attribute(&renderer, "text", i as i32);
         tree.append_column(&col);
     }
-    let scroll_table = ScrolledWindow::builder().height_request(150).child(&tree).build();
+    let scroll_table = ScrolledWindow::builder()
+        .height_request(150)
+        .child(&tree)
+        .build();
+
+    // --- CAMBIO 1: CREAR EL LABEL PARA EL MENSAJE FINAL ---
+    let end_message_label = gtk::Label::new(None);
+    end_message_label.set_visible(false); // Empezará oculto
 
     vbox.append(&hbox_top);
     vbox.append(&scroll_table);
+    vbox.append(&end_message_label); // Añadimos el label al final del layout
     window.set_child(Some(&vbox));
 
-    // --- Lógica de la aplicación ---
     let ui_logger = UiLogger::init(text_buffer.clone(), events.clone());
     let (sender, receiver) = mpsc::channel::<String>();
     LOG_SENDER.set(sender).ok();
 
-    // consumo rapido de logs para panel de texto
     {
         let ui_logger = ui_logger.clone();
         glib::timeout_add_local(std::time::Duration::from_millis(50), move || {
@@ -98,12 +114,15 @@ pub fn build_ui(app: &Application) {
         });
     }
 
-    // consumo lento de eventos para animacion visible
     {
         let events = events.clone();
         let scene = scene.clone();
         let map_area = map.clone();
-        glib::timeout_add_local(std::time::Duration::from_millis(180), move || {
+        // --- CAMBIO 2: CLONAR EL LABEL PARA USARLO EN EL CLOSURE ---
+        let end_label_clone = end_message_label.clone();
+
+        // --- APLICAMOS EL CAMBIO DE VELOCIDAD AQUÍ ---
+        glib::timeout_add_local(std::time::Duration::from_millis(350), move || {
             if let Some(ev) = events.borrow_mut().pop() {
                 match ev {
                     UiEvent::Spawn { id, kind, pos } => {
@@ -127,13 +146,18 @@ pub fn build_ui(app: &Application) {
                     UiEvent::Log(_) => {
                         // no hace nada visual
                     }
+                    // --- CAMBIO 3: AÑADIR EL CASO PARA EL NUEVO EVENTO ---
+                    UiEvent::SimulationFinished => {
+                        let markup = "<span size='xx-large' weight='bold' foreground='lime'>Simulación Finalizada</span>";
+                        end_label_clone.set_markup(markup);
+                        end_label_clone.set_visible(true);
+                    }
                 }
             }
             glib::ControlFlow::Continue
         });
     }
 
-    // conectar logger del core
     threadcity::set_logger(ui_log_fn);
 
     thread::spawn(|| {

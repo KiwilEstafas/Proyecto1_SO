@@ -17,6 +17,7 @@ pub enum UiEvent {
     Move  { id: u32, to: (u32, u32) },
     Remove { id: u32 },
     Log(String),
+    SimulationFinished
 }
 
 pub struct EventQueue {

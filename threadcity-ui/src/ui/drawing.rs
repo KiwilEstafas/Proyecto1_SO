@@ -1,3 +1,5 @@
+// EN: ui/drawing.rs
+
 use gtk::cairo::Context;
 use pangocairo::functions::{create_layout, show_layout};
 use rand::Rng;
@@ -26,7 +28,9 @@ pub const COLOR_BUILDING_SHADOW: (f64, f64, f64) = (0.6, 0.58, 0.55);
 const COLOR_CAR: (f64, f64, f64) = (0.9, 0.2, 0.2);
 const COLOR_AMB: (f64, f64, f64) = (1.0, 1.0, 1.0);
 const COLOR_TRK: (f64, f64, f64) = (0.9, 0.6, 0.1);
-const COLOR_BOT: (f64, f64, f64) = (1.0, 0.95, 0.1);
+
+// --- CAMBIO 1: Cambiar el color del barco de amarillo a azul brillante ---
+const COLOR_BOT: (f64, f64, f64) = (0.1, 0.7, 1.0); // Antes era amarillo
 
 // --- estado de escena para animar entidades ---
 
@@ -68,9 +72,10 @@ impl SceneState {
 
 pub type SharedScene = Rc<RefCell<SceneState>>;
 
-// --- Funciones de Dibujo (ahora publicas) ---
+// --- Funciones de Dibujo (sin cambios en las de fondo) ---
 
 pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
+    // ... (sin cambios aquí)
     cr.set_source_rgb(COLOR_GRASS.0, COLOR_GRASS.1, COLOR_GRASS.2);
     cr.paint().unwrap();
 
@@ -104,6 +109,7 @@ pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_river(cr: &Context, width: i32, height: i32) {
+    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let river_x = block_w * RIVER_COL as f64;
     let mut rng = rand::thread_rng();
@@ -148,6 +154,7 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
+    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
     
@@ -181,6 +188,7 @@ pub fn draw_bridges(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_plants(cr: &Context, width: i32, height: i32) {
+    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
 
@@ -203,6 +211,7 @@ pub fn draw_plants(cr: &Context, width: i32, height: i32) {
 }
 
 pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
+    // ... (sin cambios aquí)
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
 
@@ -229,7 +238,7 @@ pub fn draw_commerce_buildings(cr: &Context, width: i32, height: i32) {
     }
 }
 
-// dibujo de entidades segun escena
+// --- CAMBIO 3: Actualizar `draw_entities` para usar la nueva función ---
 pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) {
     let block_w = width as f64 / GRID_COLS as f64;
     let block_h = height as f64 / GRID_ROWS as f64;
@@ -239,32 +248,17 @@ pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) 
         let (row, col) = ev.pos;
 
         match ev.kind {
-            // Los barcos se dibujan en el centro del rio
             EntityKind::Boat => {
                 let cx = (RIVER_COL as f64 + 0.5) * block_w;
                 let cy = (row as f64 + 0.5) * block_h;
-                draw_entity_ellipse(cr, cx, cy, COLOR_BOT);
+                // Llamamos a nuestra nueva función en lugar de la de la elipse
+                draw_entity_triangle(cr, cx, cy, COLOR_BOT);
             }
-
-            // Carro / ambulancia / camion -> sobre las calles
             EntityKind::Car | EntityKind::Ambulance | EntityKind::Truck => {
-                // --- EJE Y: elegir una de las 4 calles horizontales reales (1..GRID_ROWS-1) ---
-                // row = 0 -> calle 1
-                // row = 1 -> calle 2
-                // row = 2 -> calle 3
-                // row = 3 -> calle 4
-                // row = 4 -> tambien calle 4 (no inventamos calle 5)
                 let road_row_idx = std::cmp::min(row + 1, GRID_ROWS - 1) as f64;
                 let cy = road_row_idx * block_h - road_w / 2.0;
 
-                // --- EJE X: solo hay 2 calles verticales:
-                // indice 1 (entre col 0 y 1) -> lado oeste
-                // indice 4 (entre col 3 y 4) -> lado este
-                let road_col_idx = if col < RIVER_COL {
-                    1  // oeste
-                } else {
-                    GRID_COLS - 1 // este (para cols 3 y 4)
-                } as f64;
+                let road_col_idx = if col < RIVER_COL { 1 } else { GRID_COLS - 1 } as f64;
                 let cx = road_col_idx * block_w - road_w / 2.0;
 
                 match ev.kind {
@@ -281,6 +275,7 @@ pub fn draw_entities(cr: &Context, width: i32, height: i32, scene: &SceneState) 
 // --- Helpers de Dibujo (privados al modulo) ---
 
 fn draw_single_plant(cr: &Context, x: f64, y: f64) {
+    // ... (sin cambios aquí)
     cr.set_source_rgb(COLOR_PLANT.0, COLOR_PLANT.1, COLOR_PLANT.2);
     let base_width = 30.0;
     let top_width = 22.0;
@@ -309,6 +304,7 @@ fn draw_single_plant(cr: &Context, x: f64, y: f64) {
 }
 
 fn draw_single_building(cr: &Context, x: f64, y: f64) {
+    // ... (sin cambios aquí)
     let building_size = 25.0;
     let shadow_offset = 3.0;
     let half_size = building_size / 2.0;
@@ -336,6 +332,7 @@ fn draw_single_building(cr: &Context, x: f64, y: f64) {
 }
 
 fn draw_text(cr: &Context, x: f64, y: f64, text: &str) {
+    // ... (sin cambios aquí)
     let layout = create_layout(cr);
     let mut desc = pango::FontDescription::new();
     desc.set_family("Sans");
@@ -351,6 +348,7 @@ fn draw_text(cr: &Context, x: f64, y: f64, text: &str) {
 // helpers para entidades
 
 fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    // ... (sin cambios aquí)
     let w = 12.0;
     let h = 8.0;
     cr.set_source_rgb(color.0, color.1, color.2);
@@ -359,11 +357,12 @@ fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
 }
 
 fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    // ... (esta función ya no se usará para el barco, pero la dejamos por si acaso)
     cr.save().unwrap();
     cr.translate(x, y);
 
     cr.set_source_rgb(color.0, color.1, color.2);
-    cr.scale(16.0, 10.0); // antes 8.0, 5.0
+    cr.scale(16.0, 10.0);
     cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
     cr.fill().unwrap();
 
@@ -375,7 +374,33 @@ fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
     cr.restore().unwrap();
 }
 
+// --- CAMBIO 2: Añadir una nueva función para dibujar el triángulo del barco ---
+fn draw_entity_triangle(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    let size = 20.0; // El tamaño del triángulo, puedes ajustarlo
+    let half_size = size / 2.0;
+
+    cr.set_source_rgb(color.0, color.1, color.2);
+    
+    // El barco se mueve hacia arriba (disminuye la Y), así que el triángulo apunta hacia arriba.
+    // Vértice superior
+    cr.move_to(x, y - half_size);
+    // Vértice inferior izquierdo
+    cr.line_to(x - half_size, y + half_size);
+    // Vértice inferior derecho
+    cr.line_to(x + half_size, y + half_size);
+    // Cierra la forma volviendo al vértice superior
+    cr.close_path();
+
+    cr.fill().unwrap();
+
+    // Añadimos un borde negro para que resalte más
+    cr.set_source_rgb(0.0, 0.0, 0.0);
+    cr.set_line_width(1.5);
+    cr.stroke().unwrap();
+}
+
 fn draw_entity_cross(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
+    // ... (sin cambios aquí)
     cr.set_source_rgb(0.2, 0.2, 0.2);
     cr.rectangle(x - 7.0, y - 5.0, 14.0, 10.0);
     cr.fill().unwrap();
