@@ -1,3 +1,5 @@
+/// Módulo de Dibujo para la Ciudad
+
 use gtk::cairo::Context;
 use pangocairo::functions::{create_layout, show_layout};
 use rand::Rng;
@@ -134,7 +136,7 @@ pub fn draw_background_and_roads(cr: &Context, width: i32, height: i32) {
 pub fn draw_river(cr: &Context, width: i32, height: i32) {
     let block_w = width as f64 / GRID_COLS as f64;
     let river_x = block_w * RIVER_COL as f64;
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     let pattern = gtk::cairo::LinearGradient::new(river_x, 0.0, river_x, height as f64);
     pattern.add_color_stop_rgb(0.0, COLOR_RIVER_TOP.0, COLOR_RIVER_TOP.1, COLOR_RIVER_TOP.2);
@@ -161,10 +163,10 @@ pub fn draw_river(cr: &Context, width: i32, height: i32) {
 
     cr.set_source_rgba(0.9, 0.95, 1.0, 0.2);
     for _ in 0..150 {
-        let rand_x = rng.gen_range(river_x..river_x + block_w);
-        let rand_y = rng.gen_range(0.0..height as f64);
-        let rand_w = rng.gen_range(1.0..5.0);
-        let rand_h = rng.gen_range(1.0..3.0);
+        let rand_x = rng.random_range(river_x..river_x + block_w);
+        let rand_y = rng.random_range(0.0..height as f64);
+        let rand_w = rng.random_range(1.0..5.0);
+        let rand_h = rng.random_range(1.0..3.0);
 
         cr.save().unwrap();
         cr.translate(rand_x, rand_y);
@@ -381,23 +383,6 @@ fn draw_entity_rect(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
     cr.set_source_rgb(color.0, color.1, color.2);
     cr.rectangle(x - w / 2.0, y - h / 2.0, w, h);
     cr.fill().unwrap();
-}
-
-fn draw_entity_ellipse(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {
-    cr.save().unwrap();
-    cr.translate(x, y);
-
-    cr.set_source_rgb(color.0, color.1, color.2);
-    cr.scale(16.0, 10.0);
-    cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
-    cr.fill().unwrap();
-
-    cr.set_source_rgb(0.0, 0.0, 0.0);
-    cr.arc(0.0, 0.0, 1.0, 0.0, 2.0 * std::f64::consts::PI);
-    cr.set_line_width(0.15);
-    cr.stroke().unwrap();
-
-    cr.restore().unwrap();
 }
 
 fn draw_entity_triangle(cr: &Context, x: f64, y: f64, color: (f64, f64, f64)) {

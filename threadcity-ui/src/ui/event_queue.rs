@@ -1,6 +1,3 @@
-// cola fifo de eventos para animacion sin mutex ni hilos
-// se usa solo en el hilo del ui
-
 use std::collections::VecDeque;
 
 #[derive(Clone, Debug)]
@@ -18,7 +15,6 @@ pub enum UiEvent {
     Remove { id: u32 },
     Log(String),
     SimulationFinished,
-    // NUEVOS EVENTOS PARA PLANTAS
     PlantExploded { id: u32 },
     PlantRecovered { id: u32 },
 }
@@ -38,9 +34,5 @@ impl EventQueue {
 
     pub fn pop(&mut self) -> Option<UiEvent> {
         self.queue.pop_front()
-    }
-
-    pub fn is_empty(&self) -> bool {
-        self.queue.is_empty()
     }
 }

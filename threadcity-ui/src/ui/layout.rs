@@ -14,9 +14,10 @@ use super::drawing::{SceneState, SharedScene, PlantVisState};
 use crate::ui::event_queue::{EntityKind, EventQueue, UiEvent};
 use crate::ui_logger::UiLogger;
 
-// El logger global ahora vive aquí, encapsulado dentro del módulo de UI.
+
 static LOG_SENDER: OnceCell<mpsc::Sender<String>> = OnceCell::new();
 
+/// Función de logging que envía mensajes al UI Logger
 fn ui_log_fn(msg: &str) {
     if let Some(tx) = LOG_SENDER.get() {
         let _ = tx.send(msg.to_string());
@@ -26,6 +27,7 @@ fn ui_log_fn(msg: &str) {
 
 // Función principal que construye toda la interfaz de usuario.
 pub fn build_ui(app: &Application) {
+    // Construye la interfaz gráfica de usuario
     let window = ApplicationWindow::builder()
         .application(app)
         .title("ThreadCity Visualizer")
@@ -39,6 +41,7 @@ pub fn build_ui(app: &Application) {
     let scene: SharedScene = Rc::new(RefCell::new(SceneState::default()));
     let events = Rc::new(RefCell::new(EventQueue::new()));
 
+    // Área de dibujo del mapa
     let map = DrawingArea::new();
     map.set_content_width(600);
     map.set_content_height(600);
@@ -116,6 +119,7 @@ pub fn build_ui(app: &Application) {
     }
 
     {
+        // Procesa eventos de la cola para animaciones
         let events = events.clone();
         let scene = scene.clone();
         let map_area = map.clone();

@@ -9,6 +9,7 @@ use context::Transfer;
 pub type ThreadId = u32;
 pub type ContextThreadEntry = Box<dyn FnMut(ThreadId, u32) -> ThreadSignal + Send + 'static>;
 
+/// Estado del hilo
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ThreadState {
     New,
@@ -18,6 +19,7 @@ pub enum ThreadState {
     Terminated,
 }
 
+/// Tipo de planificador
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SchedulerType {
     RoundRobin,
@@ -25,6 +27,7 @@ pub enum SchedulerType {
     RealTime,
 }
 
+/// estructura que representa un hilo
 pub struct MyThread {
     pub id: ThreadId,
     pub name: String,

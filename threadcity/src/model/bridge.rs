@@ -3,12 +3,16 @@ use mypthreads::thread::ThreadId;
 use std::collections::BinaryHeap;
 use crate::tc_log; 
 
+
+/// Dirección del tráfico en el puente
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrafficDirection {
     NorthToSouth,
     SouthToNorth,
 }
 
+
+/// Tipo de puente
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum BridgeType {
     TrafficLight, // Puente 1: semáforo
@@ -16,6 +20,8 @@ pub enum BridgeType {
     Drawbridge,   // Puente 3: levadizo para barcos
 }
 
+
+/// Estado interno del puente
 #[derive(Debug)]
 struct BridgeState {
     vehicles_crossing: u32,
@@ -24,6 +30,8 @@ struct BridgeState {
     light_state: TrafficLightState,
     last_light_change_ms: u64,
 }
+
+/// Estado del semáforo
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TrafficLightState { NorthGreen, SouthGreen }
@@ -43,6 +51,8 @@ impl PartialOrd for WaitingVehicle {
     fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> { Some(self.cmp(other)) }
 }
 
+
+/// Estructura que representa un puente
 pub struct Bridge {
     pub id: u32,
     pub bridge_type: BridgeType,
@@ -195,6 +205,8 @@ impl Bridge {
         }
     }
 
+
+    /// Notificar que un vehículo ha salido del puente
     pub fn exit_bridge(&self, tid: ThreadId) {
         if let Some(mut state) = self.state.try_enter() {
             if state.vehicles_crossing > 0 {
@@ -207,6 +219,8 @@ impl Bridge {
         }
     }
 
+
+    /// Solicitar paso para un barco (puente levadizo)
     pub fn boat_request_pass(&self) -> bool {
         if self.bridge_type != BridgeType::Drawbridge { return false; }
         if let Some(mut state) = self.state.try_enter() {
@@ -221,6 +235,8 @@ impl Bridge {
         } else { false }
     }
 
+
+    /// Notificar que un barco ha terminado de pasar
     pub fn boat_exit(&self) {
         if let Some(mut state) = self.state.try_enter() {
             state.boat_passing = false;

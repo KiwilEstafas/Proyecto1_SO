@@ -12,7 +12,7 @@ use mypthreads::{
     ThreadId, ThreadSignal,
 };
 use rand::rng;
-use rand::{prelude::*, Rng}; // Unificado para `prelude` y `Rng`
+use rand::{prelude::*, Rng};
 use std::cmp::{max, min};
 use std::sync::atomic::{AtomicU32, Ordering};
 use std::thread;
@@ -23,14 +23,12 @@ fn get_next_agent_id() -> u32 {
     NEXT_AGENT_ID.fetch_add(1, Ordering::Relaxed)
 }
 
-// La función `main` original ahora es `run_simulation` y es pública
 pub fn run_simulation() {
     tc_log!("\n╔════════════════════════════════════════════════════════════╗");
     tc_log!("║           ThreadCity - Simulación                           ║");
     tc_log!("╚════════════════════════════════════════════════════════════╝\n");
 
-    // --- SETUP ---
-    // runtime_init() se movió a main.rs
+    // --- CREACIÓN DE LA CIUDAD ---
     let (city, layout) = create_city();
     let shared_city = create_shared_city(city);
 
@@ -302,6 +300,7 @@ fn spawn_ambulance(
     }
 }
 
+/// Spawn un camión de carga
 fn spawn_cargo_truck(
     id: u32,
     layout: &CityLayout,
@@ -340,6 +339,7 @@ fn spawn_cargo_truck(
         city.force_unlock_for_main();
     }
 
+    /// Lógica del camión de carga
     let city_clone = city.clone();
     let layout_clone = layout.clone();
     let mut pos = origin;
@@ -386,6 +386,7 @@ fn spawn_cargo_truck(
         agent_type: AgentType::CargoTruck(cargo),
     };
 
+    /// Registrar el camión en la ciudad
     loop {
         if let Some(mut city_lock) = city.try_enter() {
             city_lock.agents.insert(tid, agent_info);
@@ -397,41 +398,32 @@ fn spawn_cargo_truck(
     }
 }
 
+/// Spawn un barco
 fn spawn_boat(id: u32, layout: &CityLayout, city: &SharedCity, counter: std::sync::Arc<AtomicU32>) {
     counter.fetch_add(1, Ordering::Relaxed);
     let city_clone = city.clone();
     let layout_clone = layout.clone();
-    let mut rng = rand::thread_rng();
+    let mut rng = rand::rng();
 
     // El origen del barco es desde la parte inferior de la pantalla, en la columna del río.
     let origin = Coord::new(layout.grid_rows - 1, layout.river_column);
-
-    // --- INICIO DE LA LÓGICA CORREGIDA PARA EL DESTINO ---
-
-    // 1. Obtenemos los límites lógicos de los puentes 2 y 3 para evitar errores de orden.
     let lower_bound_row = min(layout.bridge2_row, layout.bridge3_row);
     let upper_bound_row = max(layout.bridge2_row, layout.bridge3_row);
 
-    // 2. Calculamos el rango de destino teniendo en cuenta el DESFASE VISUAL de +1 cuadra.
-    //    El espacio visual está entre (puente_inferior + 1) y (puente_superior + 1).
-    //    Queremos que el destino sea una fila aleatoria DENTRO de ese espacio visible.
+    // Calcular el rango de destino teniendo en cuenta el DESFASE VISUAL de +1 cuadra.
     let start_range = lower_bound_row + 2; // Inicio del espacio visible (después del primer puente visual)
     let end_range = upper_bound_row + 1; // Fin del espacio visible (justo en el segundo puente visual)
-
     let dest_row;
-    // 3. Nos aseguramos de que el rango sea válido antes de generar el número.
+
     if end_range > start_range {
         // Genera un destino aleatorio en el espacio visual entre los puentes.
-        dest_row = rng.gen_range(start_range..end_range);
+        dest_row = rng.random_range(start_range..end_range);
     } else {
         // Si no hay espacio (puentes muy juntos), usamos una posición segura como fallback.
         dest_row = lower_bound_row + 1;
     }
 
     let dest = Coord::new(dest_row, layout.river_column);
-
-    // --- FIN DE LA LÓGICA CORREGIDA ---
-
     let mut pos = origin;
     let mut state = AgentState::Traveling;
     let mut crossing_steps = 0u32;
@@ -523,8 +515,6 @@ fn vehicle_logic(
             };
             let mut can_cross = false;
 
-            // En la lógica original, la ambulancia no usaba `try_cross` con prioridad,
-            // simplemente se le daba paso. Se mantiene esa lógica.
             if agent_type == AgentType::Ambulance {
                 tc_log!("[{}] 🚑 AMBULANCIA pasando directamente", id);
                 can_cross = true;
@@ -580,6 +570,7 @@ fn vehicle_logic(
     }
 }
 
+/// Lógica del camión de carga
 fn cargo_truck_logic(
     tid: ThreadId,
     id: u32,
@@ -640,8 +631,8 @@ fn cargo_truck_logic(
     }
 }
 
-// EN runner.rs
 
+/// Lógica del barco
 fn boat_logic(
     _tid: ThreadId,
     id: u32,
@@ -670,7 +661,6 @@ fn boat_logic(
             ThreadSignal::Yield
         }
         AgentState::WaitingForBridge => {
-            // (Esta sección no necesita cambios)
             let city_lock = match city.try_enter() {
                 Some(lock) => lock,
                 None => return ThreadSignal::Block,
@@ -692,11 +682,10 @@ fn boat_logic(
         AgentState::CrossingBridge => {
             *crossing_steps += 1;
             if *crossing_steps >= 5 {
-                pos.x -= 1; // CAMBIO: Después de cruzar, continúa moviéndose hacia arriba
+                pos.x -= 1;
                 tc_log!("[Boat-{}] ⛵ Cruzó el puente, pos: {:?}", id, pos);
                 *state = AgentState::Traveling;
 
-                // (El resto de la lógica de salida del puente no cambia)
                 let city_lock = match city.try_enter() {
                     Some(lock) => lock,
                     None => return ThreadSignal::Yield,
@@ -715,6 +704,8 @@ fn boat_logic(
     }
 }
 
+
+/// Mover la posición hacia el destino, evitando el río
 fn move_towards(pos: &mut Coord, dest: Coord, layout: &CityLayout) {
     if pos.y != dest.y {
         if pos.y < dest.y && pos.y + 1 != layout.river_column {
@@ -732,6 +723,7 @@ fn move_towards(pos: &mut Coord, dest: Coord, layout: &CityLayout) {
     }
 }
 
+/// Generar una posición aleatoria válida (evitando el río)
 fn random_position(rng: &mut impl Rng, layout: &CityLayout) -> Coord {
     let row = rng.random_range(0..layout.grid_rows);
     let col = if rng.random_bool(0.5) {
@@ -742,6 +734,7 @@ fn random_position(rng: &mut impl Rng, layout: &CityLayout) -> Coord {
     Coord::new(row, col)
 }
 
+/// Generar un destino aleatorio diferente al origen
 fn random_destination(rng: &mut impl Rng, layout: &CityLayout, origin: Coord) -> Coord {
     loop {
         let dest = random_position(rng, layout);
@@ -751,6 +744,7 @@ fn random_destination(rng: &mut impl Rng, layout: &CityLayout, origin: Coord) ->
     }
 }
 
+/// Generar un tipo de suministro aleatorio para los camiones
 fn random_supply_kind(rng: &mut impl Rng) -> SupplyKind {
     if rng.random_bool(0.5) {
         SupplyKind::Radioactive

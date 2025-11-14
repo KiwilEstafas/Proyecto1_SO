@@ -6,8 +6,7 @@ use std::rc::Rc;
 use crate::ui::drawing::{BRIDGE_ROWS, RIVER_COL};
 use crate::ui::event_queue::{EntityKind, EventQueue, UiEvent};
 
-// logger del ui que tambien traduce algunos logs a eventos para animacion
-
+/// Logger que escribe en el panel de logs del UI y genera eventos de animación
 #[derive(Clone)]
 pub struct UiLogger {
     buffer: Rc<RefCell<TextBuffer>>,
@@ -34,7 +33,7 @@ impl UiLogger {
     }
 
     fn try_parse_and_enqueue(&self, line: &str) {
-        // --- REGLAS DE CREACIÓN (SPAWN) ---
+        // --- REGLAS DE SPAWN Y MOVIMIENTO PARA VEHÍCULOS ---
 
         if let Some(id) = extract_id(line, "Carro-") {
             if let Some((o, d)) = extract_origin_dest(line) {
@@ -100,7 +99,7 @@ impl UiLogger {
             return;
         }
 
-        // Recuperación / reset de planta
+        // Reinicio de planta
         if line.contains("Planta") && line.contains("reiniciándose") {
             if let Some(pid) = extract_id(line, "Planta ") {
                 self.events
@@ -110,8 +109,7 @@ impl UiLogger {
             return;
         }
 
-        // --- REGLAS DE ELIMINACIÓN PARA VEHÍCULOS QUE NO SON BARCOS ---
-
+        // Llegada a destino de los vehículos (No aplica a los barcos)
         if line.contains("✅ Llegó a destino") {
             if let Some(id) = extract_bracket_id(line) {
                 if id < 300 {
@@ -128,8 +126,8 @@ impl UiLogger {
     }
 }
 
-// helpers de parseo
 
+/// Funciones auxiliares para extraer información de los logs
 fn extract_id(s: &str, prefix: &str) -> Option<u32> {
     if let Some(i) = s.find(prefix) {
         let rest = &s[i + prefix.len()..];
@@ -146,6 +144,7 @@ fn extract_id(s: &str, prefix: &str) -> Option<u32> {
     None
 }
 
+/// Extrae un ID encerrado entre corchetes []
 fn extract_bracket_id(s: &str) -> Option<u32> {
     if let Some(open) = s.find('[') {
         if let Some(close) = s[open + 1..].find(']') {
@@ -156,13 +155,7 @@ fn extract_bracket_id(s: &str) -> Option<u32> {
     None
 }
 
-fn extract_single_coord(s: &str) -> Option<(u32, u32)> {
-    if let Some((x, y)) = extract_coord_from(s) {
-        return Some((x, y));
-    }
-    None
-}
-
+/// Extrae coordenadas de origen y destino del log
 fn extract_origin_dest(s: &str) -> Option<((u32, u32), (u32, u32))> {
     let mut out = Vec::new();
     let mut rest = s;
@@ -184,6 +177,7 @@ fn extract_origin_dest(s: &str) -> Option<((u32, u32), (u32, u32))> {
     }
 }
 
+/// Extrae una coordenada (x, y) de un string
 fn extract_coord_from(s: &str) -> Option<(u32, u32)> {
     let xi = s.find("x: ")?;
     let after_x = &s[xi + 3..];
@@ -216,6 +210,7 @@ fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u3
             }
         }
 
+        // Cruza el río usando el puente seleccionado
         while cur.0 != cross_row {
             if cur.0 < cross_row {
                 cur.0 += 1;
@@ -279,6 +274,7 @@ fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u3
     q.push(UiEvent::Remove { id });
 }
 
+/// genera pasos de movimiento para barcos que deben subir hasta el puente levadizo
 fn enqueue_full_boat_path_upwards(
     q: &mut EventQueue,
     id: u32,

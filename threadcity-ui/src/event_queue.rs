@@ -1,8 +1,6 @@
-// cola fifo de eventos para animacion sin mutex ni hilos
-// se usa solo en el hilo del ui
-
 use std::collections::VecDeque;
 
+// cola fifo de eventos para animacion
 #[derive(Clone, Debug)]
 pub enum EntityKind {
     Car,
@@ -11,6 +9,7 @@ pub enum EntityKind {
     Truck,
 }
 
+// eventos que el ui debe procesar
 #[derive(Clone, Debug)]
 pub enum UiEvent {
     Spawn { id: u32, kind: EntityKind, pos: (u32, u32) },
@@ -23,6 +22,7 @@ pub enum UiEvent {
     PlantRecovered { id: u32 },
 }
 
+/// Cola de eventos para la UI
 pub struct EventQueue {
     queue: VecDeque<UiEvent>,
 }

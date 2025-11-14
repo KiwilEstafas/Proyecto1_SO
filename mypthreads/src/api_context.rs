@@ -74,9 +74,6 @@ pub fn ctx_mutex_lock(mutex: &SimpleMutex) -> ThreadSignal {
 pub fn ctx_mutex_unlock(mutex: &SimpleMutex) -> ThreadSignal {
     let tid = current_tid();
     if let Some(next_tid) = mutex.unlock(tid) {
-        // hay un hilo esperando, reportarlo como ready
-        // TODO: necesitamos una forma de despertar hilos
-        // por ahora solo liberamos
         let _ = next_tid;
     }
     ThreadSignal::Continue
