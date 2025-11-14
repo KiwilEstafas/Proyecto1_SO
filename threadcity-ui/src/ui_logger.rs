@@ -1,10 +1,10 @@
-use gtk::TextBuffer;
 use gtk::prelude::*;
+use gtk::TextBuffer;
 use std::cell::RefCell;
 use std::rc::Rc;
 
-use crate::ui::event_queue::{EventQueue, UiEvent, EntityKind};
-use crate::ui::drawing::{RIVER_COL, BRIDGE_ROWS};
+use crate::ui::drawing::{BRIDGE_ROWS, RIVER_COL};
+use crate::ui::event_queue::{EntityKind, EventQueue, UiEvent};
 
 // logger del ui que tambien traduce algunos logs a eventos para animacion
 
@@ -33,67 +33,86 @@ impl UiLogger {
         self.try_parse_and_enqueue(msg);
     }
 
-    fn try_parse_and_enqueue(&self, line: &str) {
-        // reglas simples de parseo para crear y mover entidades
-        // los formatos de runner usan coords debug como Coord { x: A, y: B }
+    // EN try_parse_and_enqueue (reemplaza la función entera con esta versión simplificada)
 
-        // carro creado
+    fn try_parse_and_enqueue(&self, line: &str) {
+        // --- REGLAS DE CREACIÓN (SPAWN) ---
+        // Estas son las únicas reglas que deberían iniciar una animación compleja.
+
         if let Some(id) = extract_id(line, "Carro-") {
             if let Some((o, d)) = extract_origin_dest(line) {
                 let mut q = self.events.borrow_mut();
-                q.push(UiEvent::Spawn { id, kind: EntityKind::Car, pos: o });
-                enqueue_path(&mut *q, id, o, d);
+                q.push(UiEvent::Spawn {
+                    id,
+                    kind: EntityKind::Car,
+                    pos: o,
+                });
+                enqueue_path(&mut *q, id, o, d); // Genera la ruta completa para el carro
                 return;
             }
         }
 
-        // ambulancia creada
         if let Some(id) = extract_id(line, "Ambulancia-") {
             if let Some((o, d)) = extract_origin_dest(line) {
                 let mut q = self.events.borrow_mut();
-                q.push(UiEvent::Spawn { id, kind: EntityKind::Ambulance, pos: o });
-                enqueue_path(&mut *q, id, o, d);
+                q.push(UiEvent::Spawn {
+                    id,
+                    kind: EntityKind::Ambulance,
+                    pos: o,
+                });
+                enqueue_path(&mut *q, id, o, d); // Genera la ruta completa para la ambulancia
                 return;
             }
         }
 
-        // camiones creados
         if let Some(id) = extract_id(line, "CargoTruck-") {
             if let Some((o, d)) = extract_origin_dest(line) {
                 let mut q = self.events.borrow_mut();
-                q.push(UiEvent::Spawn { id, kind: EntityKind::Truck, pos: o });
-                enqueue_path(&mut *q, id, o, d);
+                q.push(UiEvent::Spawn {
+                    id,
+                    kind: EntityKind::Truck,
+                    pos: o,
+                });
+                enqueue_path(&mut *q, id, o, d); // Genera la ruta completa para el camión
                 return;
             }
         }
 
-        // barcos creados
         if let Some(id) = extract_id(line, "Barco-") {
-            if let Some((o, d)) = extract_origin_dest(line) {
+            if let Some((origin, destination)) = extract_origin_dest(line) {
                 let mut q = self.events.borrow_mut();
-                q.push(UiEvent::Spawn { id, kind: EntityKind::Boat, pos: o });
-                enqueue_path(&mut *q, id, o, d);
-                return;
+                q.push(UiEvent::Spawn {
+                    id,
+                    kind: EntityKind::Boat,
+                    pos: origin,
+                });
+                // Llama a la función que genera la ruta COMPLETA y CORRECTA para el barco.
+                enqueue_full_boat_path_upwards(&mut *q, id, origin, destination);
+                return; // ¡Importante! No procesar más reglas para este log.
             }
         }
 
-        // llego a destino
-        if line.contains("✅ Llegó a destino") || line.contains("⛵ Cruzó el puente, pos:") {
+        // --- REGLAS DE ELIMINACIÓN PARA VEHÍCULOS QUE NO SON BARCOS ---
+        // Los barcos se eliminan solos al final de su ruta pre-generada.
+        // Esta regla es para los carros/ambulancias/camiones que pueden no tener un Remove en su `enqueue_path`.
+        if line.contains("✅ Llegó a destino") {
             if let Some(id) = extract_bracket_id(line) {
-                let mut q = self.events.borrow_mut();
-                // si es cruzo el puente con pos entonces mover a esa pos
-                if let Some(pos) = extract_single_coord(line) {
-                    q.push(UiEvent::Move { id, to: pos });
-                    return;
+                // Asumimos que los barcos tienen IDs >= 300.
+                // Si el ID es de un barco, lo ignoramos, porque su animación ya gestiona la eliminación.
+                if id < 300 {
+                    self.events.borrow_mut().push(UiEvent::Remove { id });
                 }
-                // si es llegada a destino remover
-                q.push(UiEvent::Remove { id });
                 return;
             }
         }
 
-        // fallback registrar como log simple
-        self.events.borrow_mut().push(UiEvent::Log(line.to_string()));
+        // IMPORTANTE: Hemos eliminado la regla para "⛵ Cruzó el puente, pos:".
+        // Esa regla era la fuente del error. Ya no la necesitamos.
+
+        // Fallback para cualquier otro log que no coincida con lo anterior.
+        self.events
+            .borrow_mut()
+            .push(UiEvent::Log(line.to_string()));
     }
 }
 
@@ -104,7 +123,11 @@ fn extract_id(s: &str, prefix: &str) -> Option<u32> {
         let rest = &s[i + prefix.len()..];
         let mut num = String::new();
         for ch in rest.chars() {
-            if ch.is_ascii_digit() { num.push(ch); } else { break; }
+            if ch.is_ascii_digit() {
+                num.push(ch);
+            } else {
+                break;
+            }
         }
         return num.parse::<u32>().ok();
     }
@@ -114,8 +137,8 @@ fn extract_id(s: &str, prefix: &str) -> Option<u32> {
 fn extract_bracket_id(s: &str) -> Option<u32> {
     // busca patron como [123]
     if let Some(open) = s.find('[') {
-        if let Some(close) = s[open+1..].find(']') {
-            let inside = &s[open+1..open+1+close];
+        if let Some(close) = s[open + 1..].find(']') {
+            let inside = &s[open + 1..open + 1 + close];
             return inside.trim().parse::<u32>().ok();
         }
     }
@@ -140,9 +163,15 @@ fn extract_origin_dest(s: &str) -> Option<((u32, u32), (u32, u32))> {
         } else {
             break;
         }
-        if out.len() == 2 { break; }
+        if out.len() == 2 {
+            break;
+        }
     }
-    if out.len() == 2 { Some((out[0], out[1])) } else { None }
+    if out.len() == 2 {
+        Some((out[0], out[1]))
+    } else {
+        None
+    }
 }
 
 fn extract_coord_from(s: &str) -> Option<(u32, u32)> {
@@ -163,8 +192,8 @@ fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u3
     let (dest_row, dest_col) = dest;
 
     // ¿están en lados distintos del río?
-    let needs_cross = (cur.1 < RIVER_COL && dest_col > RIVER_COL)
-        || (cur.1 > RIVER_COL && dest_col < RIVER_COL);
+    let needs_cross =
+        (cur.1 < RIVER_COL && dest_col > RIVER_COL) || (cur.1 > RIVER_COL && dest_col < RIVER_COL);
 
     if needs_cross {
         // filas de puentes reales según CityLayout::default()
@@ -246,5 +275,39 @@ fn enqueue_path(q: &mut EventQueue, id: u32, mut cur: (u32, u32), dest: (u32, u3
             q.push(UiEvent::Move { id, to: cur });
         }
     }
+    q.push(UiEvent::Remove { id });
+}
+
+/// EN EL ARCHIVO DEL UI LOGGER (reemplaza CUALQUIER otra función `enqueue_boat_...`)
+
+fn enqueue_full_boat_path_upwards(
+    q: &mut EventQueue,
+    id: u32,
+    mut cur: (u32, u32),
+    dest: (u32, u32),
+) {
+    // Fila del puente levadizo. ¡Asegúrate de que coincida con tu layout!
+    const LIFT_BRIDGE_ROW: u32 = 19;
+    let (dest_row, _dest_col) = dest;
+
+    // 1. Moverse hacia arriba HASTA la fila del puente.
+    while cur.0 > LIFT_BRIDGE_ROW {
+        cur.0 -= 1;
+        q.push(UiEvent::Move { id, to: cur });
+    }
+
+    // 2. Simular el cruce del puente. Lo movemos a la fila inmediatamente superior.
+    if cur.0 == LIFT_BRIDGE_ROW {
+        cur.0 -= 1;
+        q.push(UiEvent::Move { id, to: cur });
+    }
+
+    // 3. Continuar el movimiento hacia arriba hasta el destino final.
+    while cur.0 > dest_row {
+        cur.0 -= 1;
+        q.push(UiEvent::Move { id, to: cur });
+    }
+
+    // 4. Una vez que la animación llega al destino, eliminar el barco.
     q.push(UiEvent::Remove { id });
 }

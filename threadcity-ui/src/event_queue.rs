@@ -1,4 +1,4 @@
-use std::collections::VecDeque
+use std::collections::VecDeque;
 
 // representa un evento del simulador que el ui puede animar
 #[derive(Clone, Debug)]
